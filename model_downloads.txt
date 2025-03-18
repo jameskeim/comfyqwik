@@ -1,0 +1,70 @@
+# SDXL Models and VAEs
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
+https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
+https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL-v9.safetensors|models/checkpoints/
+https://huggingface.co/Lykon/dreamshaper-xl-1-0/resolve/main/dreamshaper_xl10.safetensors|models/checkpoints/
+https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step_lora.safetensors|models/loras/
+https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors|models/clip_vision/
+https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors|models/vae/
+https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/VAEs/orangemix.vae.pt|models/vae/
+https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/vae/kl-f8-anime2.ckpt|models/vae/
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_offset_example-lora_1.0.safetensors|models/loras/
+
+# T2I-Adapter
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_depth_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_seg_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_sketch_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_keypose_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_openpose_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_color_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_canny_sd14v1.pth|models/controlnet/
+
+# ControlNet SDXL
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-canny-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-depth-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-recolor-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-sketch-rank256.safetensors|models/controlnet/
+
+# ESRGAN upscale models
+https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth|models/upscale_models/
+https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth|models/upscale_models/
+https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth|models/upscale_models/
+
+# Reactor Face Restoration Models
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/GFPGANv1.4.pth|models/facerestore_models/
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/RestoreFormer.pth|models/facerestore_models/
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/codeformer.pth|models/facerestore_models/
+
+# IP-Adapter Models
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-composition_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15_light.safetensors|models/ipadapter/
+
+# IP-Adapter SDXL Models
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition-sdxl_vit-h.safetensors|models/ipadapter/
+
+# FLUX Models
+https://huggingface.co/NetsPresso/flex-sd15/resolve/main/flux_sd15.safetensors|models/checkpoints/
+https://huggingface.co/NetsPresso/flex-sdxl/resolve/main/flux_sdxl.safetensors|models/checkpoints/
+
+# Style & Creative Tools Models
+https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1/resolve/main/Realistic_Vision_V6B1.safetensors|models/checkpoints/
+https://huggingface.co/InstantX/InstantID/resolve/main/ip-adapter.bin|models/instantid/
+https://huggingface.co/InstantX/InstantID/resolve/main/ControlNetModel/diffusion_pytorch_model.safetensors|models/instantid/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/1k3d68.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/2d106det.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/genderage.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/scrfd_10g_bnkps.onnx|models/instantid/antelopev2/
+
+# Add new models below this line
+# Format: URL|destination_folder
+# Example: https://example.com/model.safetensors|models/checkpoints/

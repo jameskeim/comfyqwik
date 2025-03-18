@@ -6,57 +6,57 @@ echo "=== Optimized ComfyUI Parallel Setup ==="
 
 # Function to show progress
 show_progress() {
-    local msg="$1"
-    echo ""
-    echo "---------------------------------------------------"
-    echo "  $msg"
-    echo "---------------------------------------------------"
+  local msg="$1"
+  echo ""
+  echo "---------------------------------------------------"
+  echo "  $msg"
+  echo "---------------------------------------------------"
 }
 
 # Error handling function
 handle_error() {
-    echo "ERROR: $1"
-    echo "Setup failed. Please check the error message above."
-    exit 1
+  echo "ERROR: $1"
+  echo "Setup failed. Please check the error message above."
+  exit 1
 }
 
 # Function to check command success
 check_command() {
-    if [ $? -ne 0 ]; then
-        handle_error "$1"
-    fi
+  if [ $? -ne 0 ]; then
+    handle_error "$1"
+  fi
 }
 
 # Function to download models in the background
 download_models() {
-    local base_dir="$1"
-    local script_dir="$2"
-    cd "$base_dir"
-    
-    echo "Creating model directories..."
-    mkdir -p models/checkpoints
-    mkdir -p models/clip_vision
-    mkdir -p models/vae
-    mkdir -p models/loras
-    mkdir -p models/controlnet
-    mkdir -p models/upscale_models
-    mkdir -p models/facerestore_models
-    mkdir -p models/ipadapter
-    mkdir -p models/instantid/antelopev2
-    
-    # Determine optimal number of parallel downloads based on CPU cores
-    AVAILABLE_CORES=$(nproc)
-    MAX_PARALLEL_DOWNLOADS=$(( AVAILABLE_CORES * 3 / 4 ))
-    MAX_PARALLEL_DOWNLOADS=$(( MAX_PARALLEL_DOWNLOADS < 4 ? 4 : MAX_PARALLEL_DOWNLOADS ))
-    MAX_PARALLEL_DOWNLOADS=$(( MAX_PARALLEL_DOWNLOADS > 32 ? 32 : MAX_PARALLEL_DOWNLOADS ))
-    
-    echo "Starting parallel model downloads using $MAX_PARALLEL_DOWNLOADS processes..."
-    
-    # Look for download list in the script's directory
-    local download_list="$script_dir/model_downloads.txt"
-    if [ ! -f "$download_list" ]; then
-        echo "Creating default model download list in script directory..."
-        cat > "$download_list" << 'EOF'
+  local base_dir="$1"
+  local script_dir="$2"
+  cd "$base_dir"
+
+  echo "Creating model directories..."
+  mkdir -p models/checkpoints
+  mkdir -p models/clip_vision
+  mkdir -p models/vae
+  mkdir -p models/loras
+  mkdir -p models/controlnet
+  mkdir -p models/upscale_models
+  mkdir -p models/facerestore_models
+  mkdir -p models/ipadapter
+  mkdir -p models/instantid/antelopev2
+
+  # Determine optimal number of parallel downloads based on CPU cores
+  AVAILABLE_CORES=$(nproc)
+  MAX_PARALLEL_DOWNLOADS=$((AVAILABLE_CORES * 3 / 4))
+  MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS < 4 ? 4 : MAX_PARALLEL_DOWNLOADS))
+  MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS > 32 ? 32 : MAX_PARALLEL_DOWNLOADS))
+
+  echo "Starting parallel model downloads using $MAX_PARALLEL_DOWNLOADS processes..."
+
+  # Look for download list in the script's directory
+  local download_list="$script_dir/model_downloads.txt"
+  if [ ! -f "$download_list" ]; then
+    echo "Creating default model download list in script directory..."
+    cat >"$download_list" <<'EOF'
 # SDXL Models and VAEs
 https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
 https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
@@ -124,67 +124,97 @@ https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/2d106det.onnx|
 https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/genderage.onnx|models/instantid/antelopev2/
 https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/scrfd_10g_bnkps.onnx|models/instantid/antelopev2/
 EOF
+  fi
+
+  echo "Reading download list from $download_list..."
+
+  # Create a temporary file to hold download commands
+  DOWNLOAD_COMMANDS_FILE=$(mktemp)
+  DOWNLOAD_LOG_FILE=$(mktemp)
+  PROGRESS_FILE=$(mktemp)
+
+  echo "0" >"$PROGRESS_FILE"
+
+  # Read the file line by line and prepare download commands
+  while read -r line; do
+    # Skip empty lines and comments
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
     fi
-    
-    echo "Reading download list from $download_list..."
-    
-    # Create a temporary file to hold download commands
-    DOWNLOAD_COMMANDS_FILE=$(mktemp)
-    
-    # Read the file line by line and prepare download commands
-    while read -r line; do
-        # Skip empty lines and comments
-        if [[ -z "$line" || "$line" == \#* ]]; then
-            continue
-        fi
-        
-        # Split the line by pipe character to get URL and destination
-        url=$(echo "$line" | cut -d'|' -f1)
-        dest=$(echo "$line" | cut -d'|' -f2)
-        
-        # Add the download command to our commands file
-        echo "cd \"$base_dir\" && wget -q -c \"$url\" -P \"./\$dest\" --show-progress && echo \"Downloaded: \$(basename \"$url\" | cut -d'?' -f1)\"" >> "$DOWNLOAD_COMMANDS_FILE"
-    done < "$download_list"
-    
-    # Count total downloads
-    TOTAL_DOWNLOADS=$(wc -l < "$DOWNLOAD_COMMANDS_FILE")
-    echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
-    
-    # Execute downloads with xargs in the background
-    cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}" &
-    DOWNLOAD_PID=$!
-    
-    # Clean up command file
-    rm "$DOWNLOAD_COMMANDS_FILE"
-    
-    echo "Model downloads started with process ID: $DOWNLOAD_PID"
-    echo "Downloads will continue in the background while setup continues..."
+
+    # Split the line by pipe character to get URL and destination
+    url=$(echo "$line" | cut -d'|' -f1)
+    dest=$(echo "$line" | cut -d'|' -f2)
+    filename=$(basename "$url" | cut -d'?' -f1)
+
+    # Add the download command to our commands file - with quiet wget and progress update
+    echo "cd \"$base_dir\" && wget -q -c \"$url\" -P \"./$(echo $dest)\" > /dev/null 2>&1 && echo \"$filename\" >> \"$DOWNLOAD_LOG_FILE\" && CURRENT=\$(cat \"$PROGRESS_FILE\") && echo \$((\$CURRENT+1)) > \"$PROGRESS_FILE\"" >>"$DOWNLOAD_COMMANDS_FILE"
+  done <"$download_list"
+
+  # Count total downloads
+  TOTAL_DOWNLOADS=$(wc -l <"$DOWNLOAD_COMMANDS_FILE")
+  echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
+
+  # Execute downloads with xargs in the background
+  cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}" &
+  DOWNLOAD_PID=$!
+
+  # Start a background progress monitor
+  (
+    while kill -0 $DOWNLOAD_PID 2>/dev/null; do
+      CURRENT=$(cat "$PROGRESS_FILE")
+      PERCENTAGE=$((CURRENT * 100 / TOTAL_DOWNLOADS))
+      echo -ne "\rDownloading models: $CURRENT/$TOTAL_DOWNLOADS ($PERCENTAGE%) complete"
+      if [[ -s "$DOWNLOAD_LOG_FILE" ]]; then
+        LATEST=$(tail -n 1 "$DOWNLOAD_LOG_FILE")
+        echo -ne " - Latest: $LATEST"
+      fi
+      sleep 2
+      echo -ne "                                                                                 \r"
+    done
+  ) &
+  PROGRESS_PID=$!
+
+  # Clean up on script exit
+  cleanup_files() {
+    # Remove temporary files
+    rm -f "$DOWNLOAD_COMMANDS_FILE" "$PROGRESS_FILE" "$DOWNLOAD_LOG_FILE" 2>/dev/null
+    if [ -n "$PROGRESS_PID" ] && kill -0 $PROGRESS_PID 2>/dev/null; then
+      kill $PROGRESS_PID 2>/dev/null
+    fi
+  }
+
+  # Register cleanup for all exit scenarios
+  trap cleanup_files EXIT
+
+  echo "Model downloads started with process ID: $DOWNLOAD_PID"
+  echo "Downloads will continue in the background while setup continues..."
 }
 
 # Setup cleanup function for graceful exit on Ctrl+C
 cleanup() {
-    echo ""
-    echo "Setup interrupted. Cleaning up..."
-    if [ -n "$DOWNLOAD_PID" ]; then
-        echo "Stopping background downloads..."
-        kill -TERM "$DOWNLOAD_PID" 2>/dev/null || true
-    fi
-    echo "You can run the script again to resume setup."
-    exit 1
+  echo ""
+  echo "Setup interrupted. Cleaning up..."
+  if [ -n "$DOWNLOAD_PID" ]; then
+    echo "Stopping background downloads..."
+    kill -TERM "$DOWNLOAD_PID" 2>/dev/null || true
+  fi
+  echo "You can run the script again to resume setup."
+  exit 1
 }
 
 # Register the cleanup function for these signals
 trap cleanup INT TERM
 
 # Get the directory where the script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check for required commands and versions
 show_progress "Checking system requirements"
 for cmd in git python3 wget; do
-    if ! command -v $cmd &> /dev/null; then
-        handle_error "Required command '$cmd' not found. Please install it before running this script."
-    fi
+  if ! command -v $cmd &>/dev/null; then
+    handle_error "Required command '$cmd' not found. Please install it before running this script."
+  fi
 done
 
 # Check Python version
@@ -193,37 +223,37 @@ PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
 PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
 
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
-    echo "WARNING: ComfyUI works best with Python 3.8 or higher. You have Python $PYTHON_VERSION."
-    echo "Do you want to continue anyway? (y/n)"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        echo "Setup aborted. Please install Python 3.8 or higher."
-        exit 1
-    fi
+  echo "WARNING: ComfyUI works best with Python 3.8 or higher. You have Python $PYTHON_VERSION."
+  echo "Do you want to continue anyway? (y/n)"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Setup aborted. Please install Python 3.8 or higher."
+    exit 1
+  fi
 fi
 
 # Check for NVIDIA GPU and display info if available
-if command -v nvidia-smi &> /dev/null; then
-    show_progress "NVIDIA GPU detected"
-    echo "GPU Information:"
-    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
-    
-    # Check CUDA version compatibility
-    CUDA_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
-    echo "CUDA Version detected: ~$CUDA_VERSION.x"
-    
-    if [ "$CUDA_VERSION" -lt 11 ]; then
-        echo "WARNING: Detected CUDA version may be too old for optimal performance."
-        echo "ComfyUI works best with CUDA 11.x or higher."
-    fi
+if command -v nvidia-smi &>/dev/null; then
+  show_progress "NVIDIA GPU detected"
+  echo "GPU Information:"
+  nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+
+  # Check CUDA version compatibility
+  CUDA_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
+  echo "CUDA Version detected: ~$CUDA_VERSION.x"
+
+  if [ "$CUDA_VERSION" -lt 11 ]; then
+    echo "WARNING: Detected CUDA version may be too old for optimal performance."
+    echo "ComfyUI works best with CUDA 11.x or higher."
+  fi
 else
-    echo "WARNING: No NVIDIA GPU detected. ComfyUI will run in CPU mode which is significantly slower."
-    echo "Do you want to continue? (y/n)"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        echo "Setup aborted."
-        exit 1
-    fi
+  echo "WARNING: No NVIDIA GPU detected. ComfyUI will run in CPU mode which is significantly slower."
+  echo "Do you want to continue? (y/n)"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Setup aborted."
+    exit 1
+  fi
 fi
 
 # Set up working directory
@@ -233,12 +263,12 @@ cd "$INSTALL_PATH"
 
 show_progress "Step 1: Cloning ComfyUI repository"
 if [ -d ".git" ]; then
-    echo "ComfyUI repository already exists, updating..."
-    git pull
+  echo "ComfyUI repository already exists, updating..."
+  git pull
 else
-    echo "Cloning fresh ComfyUI repository..."
-    git clone https://github.com/comfyanonymous/ComfyUI .
-    check_command "Failed to clone ComfyUI repository. Check your internet connection and try again."
+  echo "Cloning fresh ComfyUI repository..."
+  git clone https://github.com/comfyanonymous/ComfyUI .
+  check_command "Failed to clone ComfyUI repository. Check your internet connection and try again."
 fi
 
 # Only start downloads after repository is cloned
@@ -247,63 +277,94 @@ download_models "$INSTALL_PATH" "$SCRIPT_DIR" &
 DOWNLOAD_PID=$!
 echo "Model downloads started with process ID: $DOWNLOAD_PID"
 
-show_progress "Step 3: Setting up Python environment (in parallel with downloads)"
-if [ -d "venv" ]; then
+show_progress "Step 3: Setting up Python environment and custom nodes in parallel"
+# Start the Python environment setup
+(
+  echo "Setting up Python virtual environment..."
+  if [ -d "venv" ]; then
     echo "Virtual environment already exists, activating..."
     source venv/bin/activate
-else
+  else
     # Create new virtual environment
     echo "Creating new virtual environment..."
     python3 -m venv venv
-    check_command "Failed to create Python virtual environment. Ensure Python 3 is installed correctly."
     source venv/bin/activate
-    check_command "Failed to activate virtual environment."
-fi
+  fi
 
-# Upgrade pip
-echo "Upgrading pip..."
-pip install --upgrade pip
+  # Upgrade pip
+  echo "Upgrading pip..."
+  pip install --upgrade pip
 
-show_progress "Step 4: Installing PyTorch with CUDA (in parallel with downloads)"
-echo "Installing PyTorch with CUDA 12.6 support..."
-pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
+  echo "Installing PyTorch with CUDA 12.6 support..."
+  pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
 
-show_progress "Step 5: Installing ComfyUI requirements (in parallel with downloads)"
-pip install -r requirements.txt
+  echo "Installing ComfyUI requirements..."
+  pip install -r requirements.txt
 
-show_progress "Step 6: Installing ComfyUI Manager and essential custom nodes"
-mkdir -p custom_nodes
-echo "Cloning ComfyUI Manager..."
-git clone https://github.com/ltdrdata/ComfyUI-Manager custom_nodes/comfyui-manager
+  echo "Python environment setup complete."
+) &
+PYTHON_SETUP_PID=$!
 
-echo "Installing additional recommended custom nodes..."
-# ControlNet Preprocessors - important for using ControlNet effectively
-git clone https://github.com/Fannovel16/comfyui_controlnet_aux custom_nodes/comfyui_controlnet_aux
-# Impact Pack - adds many useful nodes for workflows
-git clone https://github.com/ltdrdata/ComfyUI-Impact-Pack custom_nodes/ComfyUI-Impact-Pack
-# Advanced CLIP Text Encode - better text prompting
-git clone https://github.com/BlenderNeko/ComfyUI_ADV_CLIP_emb custom_nodes/ComfyUI_ADV_CLIP_emb
-# Reactor - Face restoration and refinement tool
-git clone https://codeberg.org/Gourieff/comfyui-reactor-node custom_nodes/comfyui-reactor-node
-# IP-Adapter Plus - for better image prompting and composition
-git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus custom_nodes/ComfyUI_IPAdapter_plus
-# ComfyUI Essentials - quality of life improvements
-git clone https://github.com/cubiq/ComfyUI_essentials custom_nodes/ComfyUI_essentials
-# FLUX - high-quality unified architecture for image generation
-git clone https://github.com/Nota-NetsPresso/ComfyUI-FLUX custom_nodes/ComfyUI-FLUX
+# In parallel, clone all the custom nodes
+(
+  echo "Setting up custom nodes in parallel..."
+  mkdir -p custom_nodes
 
-echo "Installing Style & Creative Tools Group..."
-# InstantID - face preservation with generative models
-git clone https://github.com/ZHO-ZHO-ZHO/ComfyUI-InstantID custom_nodes/ComfyUI-InstantID
+  # Function to clone a repository with error handling
+  clone_repo() {
+    local repo_url="$1"
+    local target_dir="$2"
+    local repo_name="$(basename "$target_dir")"
 
-echo "Installing Workflow Enhancement Group..."
-# WAS Node Suite - collection of utility nodes
-git clone https://github.com/WASasquatch/was-node-suite-comfyui custom_nodes/was-node-suite-comfyui
-# Efficiency Nodes - simplify complex workflows
-git clone https://github.com/jamesWalker55/comfyui-efficient-nodes custom_nodes/comfyui-efficient-nodes
+    echo "Cloning $repo_name..."
+    if git clone "$repo_url" "$target_dir" 2>/tmp/git_error.log; then
+      echo "✓ Successfully cloned $repo_name"
+    else
+      echo "⚠️ Failed to clone $repo_name: $(cat /tmp/git_error.log)"
+      echo "Continuing with other repositories..."
+    fi
+  }
 
-show_progress "Step 7: Creating startup script"
-cat > start_comfyui.sh << 'EOF'
+  echo "Cloning ComfyUI Manager..."
+  if git clone https://github.com/ltdrdata/ComfyUI-Manager custom_nodes/comfyui-manager 2>/tmp/git_error.log; then
+    echo "✓ Successfully cloned ComfyUI Manager"
+  else
+    echo "⚠️ Failed to clone ComfyUI Manager: $(cat /tmp/git_error.log)"
+    echo "Will continue with other components..."
+  fi
+
+  echo "Installing additional recommended custom nodes..."
+  # ControlNet Preprocessors - important for using ControlNet effectively
+  clone_repo "https://github.com/Fannovel16/comfyui_controlnet_aux" "custom_nodes/comfyui_controlnet_aux"
+  # Impact Pack - adds many useful nodes for workflows
+  clone_repo "https://github.com/ltdrdata/ComfyUI-Impact-Pack" "custom_nodes/ComfyUI-Impact-Pack"
+  # Advanced CLIP Text Encode - better text prompting
+  clone_repo "https://github.com/BlenderNeko/ComfyUI_ADV_CLIP_emb" "custom_nodes/ComfyUI_ADV_CLIP_emb"
+  # Reactor - Face restoration and refinement tool
+  clone_repo "https://codeberg.org/Gourieff/comfyui-reactor-node" "custom_nodes/comfyui-reactor-node"
+  # IP-Adapter Plus - for better image prompting and composition
+  clone_repo "https://github.com/cubiq/ComfyUI_IPAdapter_plus" "custom_nodes/ComfyUI_IPAdapter_plus"
+  # ComfyUI Essentials - quality of life improvements
+  clone_repo "https://github.com/cubiq/ComfyUI_essentials" "custom_nodes/ComfyUI_essentials"
+  # FLUX - high-quality unified architecture for image generation
+  clone_repo "https://github.com/Nota-NetsPresso/ComfyUI-FLUX" "custom_nodes/ComfyUI-FLUX"
+
+  echo "Installing Style & Creative Tools Group..."
+  # InstantID - face preservation with generative models
+  clone_repo "https://github.com/ZHO-ZHO-ZHO/ComfyUI-InstantID" "custom_nodes/ComfyUI-InstantID"
+
+  echo "Installing Workflow Enhancement Group..."
+  # WAS Node Suite - collection of utility nodes
+  clone_repo "https://github.com/WASasquatch/was-node-suite-comfyui" "custom_nodes/was-node-suite-comfyui"
+  # Efficiency Nodes - simplify complex workflows
+  clone_repo "https://github.com/jamesWalker55/comfyui-efficient-nodes" "custom_nodes/comfyui-efficient-nodes"
+
+  echo "Custom nodes setup complete."
+) &
+NODES_SETUP_PID=$!
+
+show_progress "Step 4: Creating startup script"
+cat >start_comfyui.sh <<'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
 source venv/bin/activate
@@ -312,28 +373,71 @@ EOF
 
 chmod +x start_comfyui.sh
 
+show_progress "Step 5: Waiting for parallel setups to complete"
+echo "Waiting for Python environment and custom nodes setup to complete..."
+
+# Wait for the Python setup to complete
+echo -n "Python environment setup: "
+wait $PYTHON_SETUP_PID
+if [ $? -eq 0 ]; then
+  echo "✓ Complete"
+else
+  echo "⚠️ Completed with possible issues"
+fi
+
+# Wait for the nodes setup to complete
+echo -n "Custom nodes setup: "
+wait $NODES_SETUP_PID
+if [ $? -eq 0 ]; then
+  echo "✓ Complete"
+else
+  echo "⚠️ Completed with possible issues"
+fi
+
 show_progress "Step 8: Waiting for model downloads to complete"
-echo "Python environment setup complete. Now waiting for model downloads to finish..."
+echo "Python environment setup complete. Monitoring model downloads..."
 echo "This may take some time depending on your internet connection."
 echo "You can press Ctrl+C if you want to start using ComfyUI without waiting for all models."
+
+# If the progress monitor is running, kill it to get one final summary
+if [ -n "$PROGRESS_PID" ] && kill -0 $PROGRESS_PID 2>/dev/null; then
+  kill $PROGRESS_PID
+fi
+
+# Print final download status
+if [ -f "$PROGRESS_FILE" ] && [ -f "$DOWNLOAD_LOG_FILE" ]; then
+  FINAL_COUNT=$(cat "$PROGRESS_FILE")
+  echo "Downloaded $FINAL_COUNT/$TOTAL_DOWNLOADS model files."
+
+  if [ "$FINAL_COUNT" -lt "$TOTAL_DOWNLOADS" ]; then
+    echo "The following models were downloaded:"
+    cat "$DOWNLOAD_LOG_FILE"
+    echo "Some downloads are still in progress or may have failed."
+  else
+    echo "All model downloads completed successfully!"
+  fi
+
+  # Clean up temporary files
+  rm -f "$PROGRESS_FILE" "$DOWNLOAD_LOG_FILE"
+fi
 
 # Wait for the download process to complete
 wait $DOWNLOAD_PID
 DOWNLOAD_STATUS=$?
 
 if [ $DOWNLOAD_STATUS -eq 0 ]; then
-    echo "All model downloads completed successfully!"
+  echo "Download process finished with success status."
 else
-    echo "Warning: Some downloads may not have completed successfully."
-    echo "You can run the script again later to resume incomplete downloads."
+  echo "Warning: Download process may have ended with issues."
+  echo "You can run the script again later to resume incomplete downloads."
 fi
 
 show_progress "Step 9: Creating convenience shortcuts"
 
 # Create a desktop shortcut (if desktop directory exists)
 if [ -d "$HOME/Desktop" ]; then
-    echo "Creating desktop shortcut..."
-    cat > "$HOME/Desktop/ComfyUI.desktop" << EOF
+  echo "Creating desktop shortcut..."
+  cat >"$HOME/Desktop/ComfyUI.desktop" <<EOF
 [Desktop Entry]
 Name=ComfyUI
 Comment=Stable Diffusion GUI
@@ -342,7 +446,7 @@ Terminal=true
 Type=Application
 Icon=
 EOF
-    chmod +x "$HOME/Desktop/ComfyUI.desktop"
+  chmod +x "$HOME/Desktop/ComfyUI.desktop"
 fi
 
 show_progress "=== Setup Complete ==="
