@@ -1,0 +1,64 @@
+#!/bin/bash
+set -e
+
+# Script to clean up ComfyUI models at the end of a session to save storage costs
+echo "=== ComfyUI Model Cleanup ==="
+
+# Default ComfyUI directory is current directory, but can be specified as argument
+COMFYUI_DIR=${1:-$(pwd)}
+
+# Function to show progress
+show_progress() {
+    local msg="$1"
+    echo ""
+    echo "---------------------------------------------------"
+    echo "  $msg"
+    echo "---------------------------------------------------"
+}
+
+# Check if the specified directory is a ComfyUI directory
+if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
+    echo "ERROR: The specified directory does not appear to be a ComfyUI installation."
+    echo "Please specify a valid ComfyUI directory as an argument."
+    exit 1
+fi
+
+show_progress "Calculating storage space used by models"
+SPACE_BEFORE=$(du -sh "$COMFYUI_DIR/models" | cut -f1)
+echo "Current models directory size: $SPACE_BEFORE"
+
+# Ask for confirmation
+echo ""
+echo "WARNING: This will delete all models in $COMFYUI_DIR/models/"
+echo "These can be restored by running the download_models.sh script again."
+echo "Are you sure you want to proceed? (y/n)"
+read -r response
+if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Operation cancelled."
+    exit 0
+fi
+
+show_progress "Cleaning up model files"
+
+# Option 1: Keep directories but remove files (faster for redownloading but less thorough)
+find "$COMFYUI_DIR/models" -type f -name "*.safetensors" -delete
+find "$COMFYUI_DIR/models" -type f -name "*.bin" -delete
+find "$COMFYUI_DIR/models" -type f -name "*.pth" -delete
+find "$COMFYUI_DIR/models" -type f -name "*.pt" -delete
+find "$COMFYUI_DIR/models" -type f -name "*.onnx" -delete
+find "$COMFYUI_DIR/models" -type f -name "*.ckpt" -delete
+
+# Create placeholder files to ensure directories remain
+for dir in "$COMFYUI_DIR/models"/*/ "$COMFYUI_DIR/models"/instantid/*/; do
+    if [ -d "$dir" ]; then
+        touch "$dir/.placeholder"
+    fi
+done
+
+show_progress "Cleanup Complete!"
+SPACE_AFTER=$(du -sh "$COMFYUI_DIR/models" | cut -f1)
+echo "Models directory size before: $SPACE_BEFORE"
+echo "Models directory size after: $SPACE_AFTER"
+echo ""
+echo "You have successfully removed the model files to save storage costs."
+echo "To restore them for your next session, run: ./download_models.sh"

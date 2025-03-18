@@ -1,0 +1,357 @@
+#!/bin/bash
+set -e
+
+# Optimized ComfyUI Setup Script with Parallel Downloads
+echo "=== Optimized ComfyUI Parallel Setup ==="
+
+# Function to show progress
+show_progress() {
+    local msg="$1"
+    echo ""
+    echo "---------------------------------------------------"
+    echo "  $msg"
+    echo "---------------------------------------------------"
+}
+
+# Error handling function
+handle_error() {
+    echo "ERROR: $1"
+    echo "Setup failed. Please check the error message above."
+    exit 1
+}
+
+# Function to check command success
+check_command() {
+    if [ $? -ne 0 ]; then
+        handle_error "$1"
+    fi
+}
+
+# Function to download models in the background
+download_models() {
+    local base_dir="$1"
+    local script_dir="$2"
+    cd "$base_dir"
+    
+    echo "Creating model directories..."
+    mkdir -p models/checkpoints
+    mkdir -p models/clip_vision
+    mkdir -p models/vae
+    mkdir -p models/loras
+    mkdir -p models/controlnet
+    mkdir -p models/upscale_models
+    mkdir -p models/facerestore_models
+    mkdir -p models/ipadapter
+    mkdir -p models/instantid/antelopev2
+    
+    # Determine optimal number of parallel downloads based on CPU cores
+    AVAILABLE_CORES=$(nproc)
+    MAX_PARALLEL_DOWNLOADS=$(( AVAILABLE_CORES * 3 / 4 ))
+    MAX_PARALLEL_DOWNLOADS=$(( MAX_PARALLEL_DOWNLOADS < 4 ? 4 : MAX_PARALLEL_DOWNLOADS ))
+    MAX_PARALLEL_DOWNLOADS=$(( MAX_PARALLEL_DOWNLOADS > 32 ? 32 : MAX_PARALLEL_DOWNLOADS ))
+    
+    echo "Starting parallel model downloads using $MAX_PARALLEL_DOWNLOADS processes..."
+    
+    # Look for download list in the script's directory
+    local download_list="$script_dir/model_downloads.txt"
+    if [ ! -f "$download_list" ]; then
+        echo "Creating default model download list in script directory..."
+        cat > "$download_list" << 'EOF'
+# SDXL Models and VAEs
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
+https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
+https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL-v9.safetensors|models/checkpoints/
+https://huggingface.co/Lykon/dreamshaper-xl-1-0/resolve/main/dreamshaper_xl10.safetensors|models/checkpoints/
+https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step_lora.safetensors|models/loras/
+https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors|models/clip_vision/
+https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors|models/vae/
+https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/VAEs/orangemix.vae.pt|models/vae/
+https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/vae/kl-f8-anime2.ckpt|models/vae/
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_offset_example-lora_1.0.safetensors|models/loras/
+
+# T2I-Adapter
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_depth_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_seg_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_sketch_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_keypose_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_openpose_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_color_sd14v1.pth|models/controlnet/
+https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_canny_sd14v1.pth|models/controlnet/
+
+# ControlNet SDXL
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-canny-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-depth-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-recolor-rank256.safetensors|models/controlnet/
+https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-sketch-rank256.safetensors|models/controlnet/
+
+# ESRGAN upscale models
+https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth|models/upscale_models/
+https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth|models/upscale_models/
+https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth|models/upscale_models/
+
+# Reactor Face Restoration Models
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/GFPGANv1.4.pth|models/facerestore_models/
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/RestoreFormer.pth|models/facerestore_models/
+https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/codeformer.pth|models/facerestore_models/
+
+# IP-Adapter Models
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-composition_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15_light.safetensors|models/ipadapter/
+
+# IP-Adapter SDXL Models
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition-sdxl_vit-h.safetensors|models/ipadapter/
+
+# FLUX Models
+https://huggingface.co/NetsPresso/flex-sd15/resolve/main/flux_sd15.safetensors|models/checkpoints/
+https://huggingface.co/NetsPresso/flex-sdxl/resolve/main/flux_sdxl.safetensors|models/checkpoints/
+
+# Style & Creative Tools Models
+https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1/resolve/main/Realistic_Vision_V6B1.safetensors|models/checkpoints/
+https://huggingface.co/InstantX/InstantID/resolve/main/ip-adapter.bin|models/instantid/
+https://huggingface.co/InstantX/InstantID/resolve/main/ControlNetModel/diffusion_pytorch_model.safetensors|models/instantid/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/1k3d68.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/2d106det.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/genderage.onnx|models/instantid/antelopev2/
+https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/scrfd_10g_bnkps.onnx|models/instantid/antelopev2/
+EOF
+    fi
+    
+    echo "Reading download list from $download_list..."
+    
+    # Create a temporary file to hold download commands
+    DOWNLOAD_COMMANDS_FILE=$(mktemp)
+    
+    # Read the file line by line and prepare download commands
+    while read -r line; do
+        # Skip empty lines and comments
+        if [[ -z "$line" || "$line" == \#* ]]; then
+            continue
+        fi
+        
+        # Split the line by pipe character to get URL and destination
+        url=$(echo "$line" | cut -d'|' -f1)
+        dest=$(echo "$line" | cut -d'|' -f2)
+        
+        # Add the download command to our commands file
+        echo "cd \"$base_dir\" && wget -q -c \"$url\" -P \"./\$dest\" --show-progress && echo \"Downloaded: \$(basename \"$url\" | cut -d'?' -f1)\"" >> "$DOWNLOAD_COMMANDS_FILE"
+    done < "$download_list"
+    
+    # Count total downloads
+    TOTAL_DOWNLOADS=$(wc -l < "$DOWNLOAD_COMMANDS_FILE")
+    echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
+    
+    # Execute downloads with xargs in the background
+    cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}" &
+    DOWNLOAD_PID=$!
+    
+    # Clean up command file
+    rm "$DOWNLOAD_COMMANDS_FILE"
+    
+    echo "Model downloads started with process ID: $DOWNLOAD_PID"
+    echo "Downloads will continue in the background while setup continues..."
+}
+
+# Setup cleanup function for graceful exit on Ctrl+C
+cleanup() {
+    echo ""
+    echo "Setup interrupted. Cleaning up..."
+    if [ -n "$DOWNLOAD_PID" ]; then
+        echo "Stopping background downloads..."
+        kill -TERM "$DOWNLOAD_PID" 2>/dev/null || true
+    fi
+    echo "You can run the script again to resume setup."
+    exit 1
+}
+
+# Register the cleanup function for these signals
+trap cleanup INT TERM
+
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Check for required commands and versions
+show_progress "Checking system requirements"
+for cmd in git python3 wget; do
+    if ! command -v $cmd &> /dev/null; then
+        handle_error "Required command '$cmd' not found. Please install it before running this script."
+    fi
+done
+
+# Check Python version
+PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
+
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
+    echo "WARNING: ComfyUI works best with Python 3.8 or higher. You have Python $PYTHON_VERSION."
+    echo "Do you want to continue anyway? (y/n)"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "Setup aborted. Please install Python 3.8 or higher."
+        exit 1
+    fi
+fi
+
+# Check for NVIDIA GPU and display info if available
+if command -v nvidia-smi &> /dev/null; then
+    show_progress "NVIDIA GPU detected"
+    echo "GPU Information:"
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+    
+    # Check CUDA version compatibility
+    CUDA_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
+    echo "CUDA Version detected: ~$CUDA_VERSION.x"
+    
+    if [ "$CUDA_VERSION" -lt 11 ]; then
+        echo "WARNING: Detected CUDA version may be too old for optimal performance."
+        echo "ComfyUI works best with CUDA 11.x or higher."
+    fi
+else
+    echo "WARNING: No NVIDIA GPU detected. ComfyUI will run in CPU mode which is significantly slower."
+    echo "Do you want to continue? (y/n)"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "Setup aborted."
+        exit 1
+    fi
+fi
+
+# Set up working directory
+INSTALL_PATH=${1:-$(pwd)/ComfyUI}
+mkdir -p "$INSTALL_PATH"
+cd "$INSTALL_PATH"
+
+show_progress "Step 1: Cloning ComfyUI repository"
+if [ -d ".git" ]; then
+    echo "ComfyUI repository already exists, updating..."
+    git pull
+else
+    echo "Cloning fresh ComfyUI repository..."
+    git clone https://github.com/comfyanonymous/ComfyUI .
+    check_command "Failed to clone ComfyUI repository. Check your internet connection and try again."
+fi
+
+# Only start downloads after repository is cloned
+show_progress "Step 2: Starting model downloads in parallel"
+download_models "$INSTALL_PATH" "$SCRIPT_DIR" &
+DOWNLOAD_PID=$!
+echo "Model downloads started with process ID: $DOWNLOAD_PID"
+
+show_progress "Step 3: Setting up Python environment (in parallel with downloads)"
+if [ -d "venv" ]; then
+    echo "Virtual environment already exists, activating..."
+    source venv/bin/activate
+else
+    # Create new virtual environment
+    echo "Creating new virtual environment..."
+    python3 -m venv venv
+    check_command "Failed to create Python virtual environment. Ensure Python 3 is installed correctly."
+    source venv/bin/activate
+    check_command "Failed to activate virtual environment."
+fi
+
+# Upgrade pip
+echo "Upgrading pip..."
+pip install --upgrade pip
+
+show_progress "Step 4: Installing PyTorch with CUDA (in parallel with downloads)"
+echo "Installing PyTorch with CUDA 12.6 support..."
+pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
+
+show_progress "Step 5: Installing ComfyUI requirements (in parallel with downloads)"
+pip install -r requirements.txt
+
+show_progress "Step 6: Installing ComfyUI Manager and essential custom nodes"
+mkdir -p custom_nodes
+echo "Cloning ComfyUI Manager..."
+git clone https://github.com/ltdrdata/ComfyUI-Manager custom_nodes/comfyui-manager
+
+echo "Installing additional recommended custom nodes..."
+# ControlNet Preprocessors - important for using ControlNet effectively
+git clone https://github.com/Fannovel16/comfyui_controlnet_aux custom_nodes/comfyui_controlnet_aux
+# Impact Pack - adds many useful nodes for workflows
+git clone https://github.com/ltdrdata/ComfyUI-Impact-Pack custom_nodes/ComfyUI-Impact-Pack
+# Advanced CLIP Text Encode - better text prompting
+git clone https://github.com/BlenderNeko/ComfyUI_ADV_CLIP_emb custom_nodes/ComfyUI_ADV_CLIP_emb
+# Reactor - Face restoration and refinement tool
+git clone https://codeberg.org/Gourieff/comfyui-reactor-node custom_nodes/comfyui-reactor-node
+# IP-Adapter Plus - for better image prompting and composition
+git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus custom_nodes/ComfyUI_IPAdapter_plus
+# ComfyUI Essentials - quality of life improvements
+git clone https://github.com/cubiq/ComfyUI_essentials custom_nodes/ComfyUI_essentials
+# FLUX - high-quality unified architecture for image generation
+git clone https://github.com/Nota-NetsPresso/ComfyUI-FLUX custom_nodes/ComfyUI-FLUX
+
+echo "Installing Style & Creative Tools Group..."
+# InstantID - face preservation with generative models
+git clone https://github.com/ZHO-ZHO-ZHO/ComfyUI-InstantID custom_nodes/ComfyUI-InstantID
+
+echo "Installing Workflow Enhancement Group..."
+# WAS Node Suite - collection of utility nodes
+git clone https://github.com/WASasquatch/was-node-suite-comfyui custom_nodes/was-node-suite-comfyui
+# Efficiency Nodes - simplify complex workflows
+git clone https://github.com/jamesWalker55/comfyui-efficient-nodes custom_nodes/comfyui-efficient-nodes
+
+show_progress "Step 7: Creating startup script"
+cat > start_comfyui.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+source venv/bin/activate
+python main.py --listen
+EOF
+
+chmod +x start_comfyui.sh
+
+show_progress "Step 8: Waiting for model downloads to complete"
+echo "Python environment setup complete. Now waiting for model downloads to finish..."
+echo "This may take some time depending on your internet connection."
+echo "You can press Ctrl+C if you want to start using ComfyUI without waiting for all models."
+
+# Wait for the download process to complete
+wait $DOWNLOAD_PID
+DOWNLOAD_STATUS=$?
+
+if [ $DOWNLOAD_STATUS -eq 0 ]; then
+    echo "All model downloads completed successfully!"
+else
+    echo "Warning: Some downloads may not have completed successfully."
+    echo "You can run the script again later to resume incomplete downloads."
+fi
+
+show_progress "Step 9: Creating convenience shortcuts"
+
+# Create a desktop shortcut (if desktop directory exists)
+if [ -d "$HOME/Desktop" ]; then
+    echo "Creating desktop shortcut..."
+    cat > "$HOME/Desktop/ComfyUI.desktop" << EOF
+[Desktop Entry]
+Name=ComfyUI
+Comment=Stable Diffusion GUI
+Exec=bash -c "cd $INSTALL_PATH && ./start_comfyui.sh"
+Terminal=true
+Type=Application
+Icon=
+EOF
+    chmod +x "$HOME/Desktop/ComfyUI.desktop"
+fi
+
+show_progress "=== Setup Complete ==="
+echo "ComfyUI has been successfully set up at: $INSTALL_PATH"
+echo ""
+echo "To start ComfyUI:"
+echo "cd $INSTALL_PATH && ./start_comfyui.sh"
+echo ""
+echo "ComfyUI will be accessible at http://SERVER_IP:8188"
+echo ""
+echo "To activate the virtual environment in the future:"
+echo "cd $INSTALL_PATH && source venv/bin/activate"
