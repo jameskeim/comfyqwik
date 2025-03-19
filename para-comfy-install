@@ -1,4 +1,21 @@
+# Create required model directories
+mkdir -p models/checkpoints
+mkdir -p models/clip_vision
+mkdir -p models/vae
+mkdir -p models/loras
+mkdir -p models/controlnet
+mkdir -p models/upscale_models
+mkdir -p models/facerestore_models
+mkdir -p models/ipadapter
+mkdir -p models/instantid/antelopev2show_progress "Step 3: Creating startup script"
+cat >start_comfyui.sh <<'EOF'
 #!/bin/bash
+cd "$(dirname "$0")"
+source venv/bin/activate
+python main.py --listen
+EOF
+
+chmod +x start_comfyui.sh#!/bin/bash
 set -e
 
 # Optimized ComfyUI Setup Script with Parallel Downloads
@@ -29,166 +46,10 @@ check_command() {
 
 # Function to download models in the background
 download_models() {
-  local base_dir="$1"
-  local script_dir="$2"
-  cd "$base_dir"
-
-  echo "Creating model directories..."
-  mkdir -p models/checkpoints
-  mkdir -p models/clip_vision
-  mkdir -p models/vae
-  mkdir -p models/loras
-  mkdir -p models/controlnet
-  mkdir -p models/upscale_models
-  mkdir -p models/facerestore_models
-  mkdir -p models/ipadapter
-  mkdir -p models/instantid/antelopev2
-
-  # Determine optimal number of parallel downloads based on CPU cores
-  AVAILABLE_CORES=$(nproc)
-  MAX_PARALLEL_DOWNLOADS=$((AVAILABLE_CORES * 3 / 4))
-  MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS < 4 ? 4 : MAX_PARALLEL_DOWNLOADS))
-  MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS > 32 ? 32 : MAX_PARALLEL_DOWNLOADS))
-
-  echo "Starting parallel model downloads using $MAX_PARALLEL_DOWNLOADS processes..."
-
-  # Look for download list in the script's directory
-  local download_list="$script_dir/model_downloads.txt"
-  if [ ! -f "$download_list" ]; then
-    echo "Creating default model download list in script directory..."
-    cat >"$download_list" <<'EOF'
-# SDXL Models and VAEs
-https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
-https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
-https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL-v9.safetensors|models/checkpoints/
-https://huggingface.co/Lykon/dreamshaper-xl-1-0/resolve/main/dreamshaper_xl10.safetensors|models/checkpoints/
-https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step_lora.safetensors|models/loras/
-https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors|models/clip_vision/
-https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors|models/vae/
-https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/VAEs/orangemix.vae.pt|models/vae/
-https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/vae/kl-f8-anime2.ckpt|models/vae/
-https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_offset_example-lora_1.0.safetensors|models/loras/
-
-# T2I-Adapter
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_depth_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_seg_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_sketch_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_keypose_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_openpose_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_color_sd14v1.pth|models/controlnet/
-https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_canny_sd14v1.pth|models/controlnet/
-
-# ControlNet SDXL
-https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-canny-rank256.safetensors|models/controlnet/
-https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-depth-rank256.safetensors|models/controlnet/
-https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-recolor-rank256.safetensors|models/controlnet/
-https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-sketch-rank256.safetensors|models/controlnet/
-
-# ESRGAN upscale models
-https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth|models/upscale_models/
-https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth|models/upscale_models/
-https://huggingface.co/sberbank-ai/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth|models/upscale_models/
-
-# Reactor Face Restoration Models
-https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/GFPGANv1.4.pth|models/facerestore_models/
-https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/RestoreFormer.pth|models/facerestore_models/
-https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/codeformer.pth|models/facerestore_models/
-
-# IP-Adapter Models
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-composition_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15_light.safetensors|models/ipadapter/
-
-# IP-Adapter SDXL Models
-https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition_sdxl_vit-h.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition-sdxl_vit-h.safetensors|models/ipadapter/
-
-# FLUX Models
-https://huggingface.co/NetsPresso/flex-sd15/resolve/main/flux_sd15.safetensors|models/checkpoints/
-https://huggingface.co/NetsPresso/flex-sdxl/resolve/main/flux_sdxl.safetensors|models/checkpoints/
-
-# Style & Creative Tools Models
-https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1/resolve/main/Realistic_Vision_V6B1.safetensors|models/checkpoints/
-https://huggingface.co/InstantX/InstantID/resolve/main/ip-adapter.bin|models/instantid/
-https://huggingface.co/InstantX/InstantID/resolve/main/ControlNetModel/diffusion_pytorch_model.safetensors|models/instantid/
-https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/1k3d68.onnx|models/instantid/antelopev2/
-https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/2d106det.onnx|models/instantid/antelopev2/
-https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/genderage.onnx|models/instantid/antelopev2/
-https://huggingface.co/InstantX/InstantID/resolve/main/antelopev2/scrfd_10g_bnkps.onnx|models/instantid/antelopev2/
-EOF
-  fi
-
-  echo "Reading download list from $download_list..."
-
-  # Create a temporary file to hold download commands
-  DOWNLOAD_COMMANDS_FILE=$(mktemp)
-  DOWNLOAD_LOG_FILE=$(mktemp)
-  PROGRESS_FILE=$(mktemp)
-
-  echo "0" >"$PROGRESS_FILE"
-
-  # Read the file line by line and prepare download commands
-  while read -r line; do
-    # Skip empty lines and comments
-    if [[ -z "$line" || "$line" == \#* ]]; then
-      continue
-    fi
-
-    # Split the line by pipe character to get URL and destination
-    url=$(echo "$line" | cut -d'|' -f1)
-    dest=$(echo "$line" | cut -d'|' -f2)
-    filename=$(basename "$url" | cut -d'?' -f1)
-
-    # Add the download command to our commands file - with quiet wget and progress update
-    echo "cd \"$base_dir\" && wget -q -c \"$url\" -P \"./$(echo $dest)\" > /dev/null 2>&1 && echo \"$filename\" >> \"$DOWNLOAD_LOG_FILE\" && CURRENT=\$(cat \"$PROGRESS_FILE\") && echo \$((\$CURRENT+1)) > \"$PROGRESS_FILE\"" >>"$DOWNLOAD_COMMANDS_FILE"
-  done <"$download_list"
-
-  # Count total downloads
-  TOTAL_DOWNLOADS=$(wc -l <"$DOWNLOAD_COMMANDS_FILE")
-  echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
-
-  # Execute downloads with xargs in the background
-  cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}" &
-  DOWNLOAD_PID=$!
-
-  # Start a background progress monitor
-  (
-    while kill -0 $DOWNLOAD_PID 2>/dev/null; do
-      CURRENT=$(cat "$PROGRESS_FILE")
-      PERCENTAGE=$((CURRENT * 100 / TOTAL_DOWNLOADS))
-      echo -ne "\rDownloading models: $CURRENT/$TOTAL_DOWNLOADS ($PERCENTAGE%) complete"
-      if [[ -s "$DOWNLOAD_LOG_FILE" ]]; then
-        LATEST=$(tail -n 1 "$DOWNLOAD_LOG_FILE")
-        echo -ne " - Latest: $LATEST"
-      fi
-      sleep 2
-      echo -ne "                                                                                 \r"
-    done
-  ) &
-  PROGRESS_PID=$!
-
-  # Clean up on script exit
-  cleanup_files() {
-    # Remove temporary files
-    rm -f "$DOWNLOAD_COMMANDS_FILE" "$PROGRESS_FILE" "$DOWNLOAD_LOG_FILE" 2>/dev/null
-    if [ -n "$PROGRESS_PID" ] && kill -0 $PROGRESS_PID 2>/dev/null; then
-      kill $PROGRESS_PID 2>/dev/null
-    fi
-  }
-
-  # Register cleanup for all exit scenarios
-  trap cleanup_files EXIT
-
-  echo "Model downloads started with process ID: $DOWNLOAD_PID"
-  echo "Downloads will continue in the background while setup continues..."
+  # This function has been removed.
+  # The models are now downloaded using the separate install-models script
+  echo "This function is deprecated. Please use the separate install-models script."
+  return 1
 }
 
 # Setup cleanup function for graceful exit on Ctrl+C
@@ -272,12 +133,7 @@ else
 fi
 
 # Only start downloads after repository is cloned
-show_progress "Step 2: Starting model downloads in parallel"
-download_models "$INSTALL_PATH" "$SCRIPT_DIR" &
-DOWNLOAD_PID=$!
-echo "Model downloads started with process ID: $DOWNLOAD_PID"
-
-show_progress "Step 3: Setting up Python environment and custom nodes in parallel"
+show_progress "Step 2: Setting up Python environment and custom nodes in parallel"
 # Start the Python environment setup
 (
   echo "Setting up Python virtual environment..."
@@ -347,7 +203,7 @@ PYTHON_SETUP_PID=$!
   # ComfyUI Essentials - quality of life improvements
   clone_repo "https://github.com/cubiq/ComfyUI_essentials" "custom_nodes/ComfyUI_essentials"
   # FLUX - high-quality unified architecture for image generation
-  clone_repo "https://github.com/Nota-NetsPresso/ComfyUI-FLUX" "custom_nodes/ComfyUI-FLUX"
+  #  clone_repo "https://github.com/Nota-NetsPresso/ComfyUI-FLUX" "custom_nodes/ComfyUI-FLUX"
 
   echo "Installing Style & Creative Tools Group..."
   # InstantID - face preservation with generative models
@@ -357,23 +213,13 @@ PYTHON_SETUP_PID=$!
   # WAS Node Suite - collection of utility nodes
   clone_repo "https://github.com/WASasquatch/was-node-suite-comfyui" "custom_nodes/was-node-suite-comfyui"
   # Efficiency Nodes - simplify complex workflows
-  clone_repo "https://github.com/jamesWalker55/comfyui-efficient-nodes" "custom_nodes/comfyui-efficient-nodes"
+  #  clone_repo "https://github.com/jamesWalker55/comfyui-efficient-nodes" "custom_nodes/comfyui-efficient-nodes"
 
   echo "Custom nodes setup complete."
 ) &
 NODES_SETUP_PID=$!
 
-show_progress "Step 4: Creating startup script"
-cat >start_comfyui.sh <<'EOF'
-#!/bin/bash
-cd "$(dirname "$0")"
-source venv/bin/activate
-python main.py --listen
-EOF
-
-chmod +x start_comfyui.sh
-
-show_progress "Step 5: Waiting for parallel setups to complete"
+show_progress "Step 4: Waiting for parallel setups to complete"
 echo "Waiting for Python environment and custom nodes setup to complete..."
 
 # Wait for the Python setup to complete
@@ -394,45 +240,7 @@ else
   echo "⚠️ Completed with possible issues"
 fi
 
-show_progress "Step 8: Waiting for model downloads to complete"
-echo "Python environment setup complete. Monitoring model downloads..."
-echo "This may take some time depending on your internet connection."
-echo "You can press Ctrl+C if you want to start using ComfyUI without waiting for all models."
-
-# If the progress monitor is running, kill it to get one final summary
-if [ -n "$PROGRESS_PID" ] && kill -0 $PROGRESS_PID 2>/dev/null; then
-  kill $PROGRESS_PID
-fi
-
-# Print final download status
-if [ -f "$PROGRESS_FILE" ] && [ -f "$DOWNLOAD_LOG_FILE" ]; then
-  FINAL_COUNT=$(cat "$PROGRESS_FILE")
-  echo "Downloaded $FINAL_COUNT/$TOTAL_DOWNLOADS model files."
-
-  if [ "$FINAL_COUNT" -lt "$TOTAL_DOWNLOADS" ]; then
-    echo "The following models were downloaded:"
-    cat "$DOWNLOAD_LOG_FILE"
-    echo "Some downloads are still in progress or may have failed."
-  else
-    echo "All model downloads completed successfully!"
-  fi
-
-  # Clean up temporary files
-  rm -f "$PROGRESS_FILE" "$DOWNLOAD_LOG_FILE"
-fi
-
-# Wait for the download process to complete
-wait $DOWNLOAD_PID
-DOWNLOAD_STATUS=$?
-
-if [ $DOWNLOAD_STATUS -eq 0 ]; then
-  echo "Download process finished with success status."
-else
-  echo "Warning: Download process may have ended with issues."
-  echo "You can run the script again later to resume incomplete downloads."
-fi
-
-show_progress "Step 9: Creating convenience shortcuts"
+show_progress "Step 5: Creating convenience shortcuts"
 
 # Create a desktop shortcut (if desktop directory exists)
 if [ -d "$HOME/Desktop" ]; then
@@ -459,3 +267,6 @@ echo "ComfyUI will be accessible at http://SERVER_IP:8188"
 echo ""
 echo "To activate the virtual environment in the future:"
 echo "cd $INSTALL_PATH && source venv/bin/activate"
+echo ""
+echo "IMPORTANT: To download models, run the install-models script:"
+echo "./install-models $INSTALL_PATH"

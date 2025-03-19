@@ -10,13 +10,13 @@ A collection of scripts to make setting up and managing ComfyUI on cloud GPU ser
 
 ### 1. `para-comfy-install`
 
-The main setup script that does *everything* in parallel because waiting is for chumps:
+The main setup script that does ComfyUI installation in parallel because waiting is for chumps:
 
 - Clones ComfyUI
 - Sets up Python venv with all requirements
 - Installs PyTorch with CUDA
-- Downloads all models in parallel
 - Installs tons of useful custom nodes
+- Creates the necessary model directories
 - Does it all simultaneously to save your precious time and money
 
 ```bash
@@ -74,10 +74,11 @@ The shopping list of models to download:
 For the truly work-efficient (aka lazy) cloud user:
 
 1. Start your expensive GPU instance
-2. Run `para-comfy-install` to set everything up lightning fast
-3. Create amazing AI art
-4. Run `clean-models` before shutting down to save on storage costs
-5. Next time, just run `install-models` to get your models back
+2. Run `para-comfy-install` to set up ComfyUI and custom nodes lightning fast
+3. Run `install-models` to download all models (can run while you work on something else)
+4. Create amazing AI art
+5. Run `clean-models` before shutting down to save on storage costs
+6. Next time, just run `install-models` to get your models back
 
 ## Requirements
 

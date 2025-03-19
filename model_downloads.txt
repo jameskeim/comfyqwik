@@ -1,9 +1,8 @@
 # SDXL Models and VAEs
 https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
 https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
-https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL-v9.safetensors|models/checkpoints/
-https://huggingface.co/Lykon/dreamshaper-xl-1-0/resolve/main/dreamshaper_xl10.safetensors|models/checkpoints/
-https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step_lora.safetensors|models/loras/
+https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors|models/checkpoints/
+https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2_1.safetensors|models/checkpoints/
 https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors|models/clip_vision/
 https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors|models/vae/
 https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/VAEs/orangemix.vae.pt|models/vae/
