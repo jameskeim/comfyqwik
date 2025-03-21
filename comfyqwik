@@ -1,0 +1,358 @@
+#!/bin/bash
+set -e
+
+# Optimized ComfyUI Setup Script with Parallel Downloads
+echo "=== comfyqwik: Fast ComfyUI Setup ==="
+
+# Function to show progress
+show_progress() {
+  local msg="$1"
+  echo ""
+  echo "---------------------------------------------------"
+  echo "  $msg"
+  echo "---------------------------------------------------"
+}
+
+# Error handling function
+handle_error() {
+  echo "ERROR: $1"
+  echo "Setup failed. Please check the error message above."
+  exit 1
+}
+
+# Function to check command success
+check_command() {
+  if [ $? -ne 0 ]; then
+    handle_error "$1"
+  fi
+}
+
+# Function to download models in the background
+download_models() {
+  # This function has been removed.
+  # The models are now downloaded using the separate install-models script
+  echo "This function is deprecated. Please use the separate install-models script."
+  return 1
+}
+
+# Setup cleanup function for graceful exit on Ctrl+C
+cleanup() {
+  echo ""
+  echo "Setup interrupted. Cleaning up..."
+  if [ -n "$DOWNLOAD_PID" ]; then
+    echo "Stopping background downloads..."
+    kill -TERM "$DOWNLOAD_PID" 2>/dev/null || true
+  fi
+  echo "You can run the script again to resume setup."
+  exit 1
+}
+
+# Register the cleanup function for these signals
+trap cleanup INT TERM
+
+# Get the directory where the script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check for required commands and versions
+show_progress "Checking system requirements"
+for cmd in git python3 wget; do
+  if ! command -v $cmd &>/dev/null; then
+    handle_error "Required command '$cmd' not found. Please install it before running this script."
+  fi
+done
+
+# Check Python version
+PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
+
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
+  echo "WARNING: ComfyUI works best with Python 3.8 or higher. You have Python $PYTHON_VERSION."
+  echo "Do you want to continue anyway? (y/n)"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Setup aborted. Please install Python 3.8 or higher."
+    exit 1
+  fi
+fi
+
+# Check for NVIDIA GPU and display info if available
+if command -v nvidia-smi &>/dev/null; then
+  show_progress "NVIDIA GPU detected"
+  echo "GPU Information:"
+  nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+
+  # Check CUDA version compatibility
+  CUDA_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
+  echo "CUDA Version detected: ~$CUDA_VERSION.x"
+
+  if [ "$CUDA_VERSION" -lt 11 ]; then
+    echo "WARNING: Detected CUDA version may be too old for optimal performance."
+    echo "ComfyUI works best with CUDA 11.x or higher."
+  fi
+else
+  echo "WARNING: No NVIDIA GPU detected. ComfyUI will run in CPU mode which is significantly slower."
+  echo "Do you want to continue? (y/n)"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Setup aborted."
+    exit 1
+  fi
+fi
+
+# Set up working directory
+INSTALL_PATH=${1:-$(pwd)/ComfyUI}
+mkdir -p "$INSTALL_PATH"
+cd "$INSTALL_PATH"
+
+# Set environment variables for installation scripts
+export COMFYUI_PATH="$INSTALL_PATH"
+export COMFYUI_MODEL_PATH="$INSTALL_PATH/models"
+
+show_progress "Step 1: Cloning ComfyUI repository"
+if [ -d ".git" ]; then
+  echo "ComfyUI repository already exists, updating..."
+  git pull
+else
+  echo "Cloning fresh ComfyUI repository..."
+  git clone https://github.com/comfyanonymous/ComfyUI .
+  check_command "Failed to clone ComfyUI repository. Check your internet connection and try again."
+fi
+
+# Only start downloads after repository is cloned
+show_progress "Step 2: Setting up Python environment and custom nodes in parallel"
+# Start the Python environment setup
+(
+  echo "Setting up Python virtual environment..."
+  if [ -d "venv" ]; then
+    echo "Virtual environment already exists, activating..."
+    source venv/bin/activate
+  else
+    # Create new virtual environment
+    echo "Creating new virtual environment..."
+    python3 -m venv venv
+    source venv/bin/activate
+  fi
+
+  # Upgrade pip
+  echo "Upgrading pip..."
+  pip install --upgrade pip
+
+  # Ask user about CUDA version preference
+  echo ""
+  echo "Which CUDA version would you like to use for PyTorch installation?"
+  echo "1) CUDA 12.1 (Better compatibility with a wide range of systems)"
+  echo "2) CUDA 12.6 (Cutting edge, requires latest drivers)"
+  read -p "Enter your choice (1 or 2): " cuda_choice
+
+  if [ "$cuda_choice" == "2" ]; then
+    echo "Installing PyTorch with CUDA 12.6 support..."
+    pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
+  else
+    echo "Installing PyTorch with CUDA 12.1 support..."
+    pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121
+  fi
+
+  echo "Installing ComfyUI requirements..."
+  pip install -r requirements.txt
+
+  echo "Python environment setup complete."
+) &
+PYTHON_SETUP_PID=$!
+
+# In parallel, clone all the custom nodes
+(
+  echo "Setting up custom nodes in parallel..."
+  mkdir -p custom_nodes
+
+  # Function to clone a repository with error handling
+  clone_repo() {
+    local repo_url="$1"
+    local target_dir="$2"
+    local repo_name="$(basename "$target_dir")"
+
+    echo "Cloning $repo_name..."
+    if git clone "$repo_url" "$target_dir" 2>/tmp/git_error.log; then
+      echo "✓ Successfully cloned $repo_name"
+    else
+      echo "⚠️ Failed to clone $repo_name: $(cat /tmp/git_error.log)"
+      echo "Continuing with other repositories..."
+    fi
+  }
+
+  echo "Cloning ComfyUI Manager..."
+  if git clone https://github.com/ltdrdata/ComfyUI-Manager custom_nodes/comfyui-manager 2>/tmp/git_error.log; then
+    echo "✓ Successfully cloned ComfyUI Manager"
+  else
+    echo "⚠️ Failed to clone ComfyUI Manager: $(cat /tmp/git_error.log)"
+    echo "Will continue with other components..."
+  fi
+
+  echo "Installing additional recommended custom nodes..."
+  # ControlNet Preprocessors - important for using ControlNet effectively
+  clone_repo "https://github.com/Fannovel16/comfyui_controlnet_aux" "custom_nodes/comfyui_controlnet_aux"
+  # Impact Pack - adds many useful nodes for workflows
+  clone_repo "https://github.com/ltdrdata/ComfyUI-Impact-Pack" "custom_nodes/ComfyUI-Impact-Pack"
+  # Advanced CLIP Text Encode - better text prompting
+  clone_repo "https://github.com/BlenderNeko/ComfyUI_ADV_CLIP_emb" "custom_nodes/ComfyUI_ADV_CLIP_emb"
+  # Reactor - Face restoration and refinement tool
+  clone_repo "https://codeberg.org/Gourieff/comfyui-reactor-node" "custom_nodes/comfyui-reactor-node"
+  # IP-Adapter Plus - for better image prompting and composition
+  clone_repo "https://github.com/cubiq/ComfyUI_IPAdapter_plus" "custom_nodes/ComfyUI_IPAdapter_plus"
+  # ComfyUI Essentials - quality of life improvements
+  clone_repo "https://github.com/cubiq/ComfyUI_essentials" "custom_nodes/ComfyUI_essentials"
+
+  echo "Installing Style & Creative Tools Group..."
+  # InstantID - face preservation with generative models
+  clone_repo "https://github.com/ZHO-ZHO-ZHO/ComfyUI-InstantID" "custom_nodes/ComfyUI-InstantID"
+
+  echo "Installing Workflow Enhancement Group..."
+  # WAS Node Suite - collection of utility nodes
+  clone_repo "https://github.com/WASasquatch/was-node-suite-comfyui" "custom_nodes/was-node-suite-comfyui"
+
+  echo "Custom nodes cloning complete."
+) &
+NODES_SETUP_PID=$!
+
+show_progress "Step 4: Waiting for parallel setups to complete"
+echo "Waiting for Python environment and custom nodes setup to complete..."
+
+# Wait for the Python setup to complete
+echo -n "Python environment setup: "
+wait $PYTHON_SETUP_PID
+if [ $? -eq 0 ]; then
+  echo "✓ Complete"
+else
+  echo "⚠️ Completed with possible issues"
+fi
+
+# Wait for the nodes setup to complete
+echo -n "Custom nodes cloning: "
+wait $NODES_SETUP_PID
+if [ $? -eq 0 ]; then
+  echo "✓ Complete"
+else
+  echo "⚠️ Completed with possible issues"
+fi
+
+show_progress "Step 5: Installing requirements for custom nodes"
+echo "Installing requirements for each custom node sequentially..."
+
+# Function to install requirements for a repository
+install_requirements() {
+  local repo_dir="$1"
+  local repo_name="$(basename "$repo_dir")"
+
+  # First check for regular requirements.txt
+  if [ -f "$repo_dir/requirements.txt" ]; then
+    echo "Installing requirements for $repo_name..."
+    cd "$repo_dir"
+    ../../venv/bin/pip install -r requirements.txt
+    local pip_status=$?
+    cd ../..
+
+    if [ $pip_status -eq 0 ]; then
+      echo "✓ Requirements installed for $repo_name"
+    else
+      echo "⚠️ Some issues occurred while installing requirements for $repo_name"
+    fi
+  else
+    echo "No requirements.txt found for $repo_name"
+  fi
+
+  # Check for install.py or setup.py scripts
+  if [ -f "$repo_dir/install.py" ]; then
+    echo "Found install.py script for $repo_name, running it..."
+    cd "$repo_dir"
+    ../../venv/bin/python install.py
+    local install_status=$?
+    cd ../..
+
+    if [ $install_status -eq 0 ]; then
+      echo "✓ install.py executed successfully for $repo_name"
+    else
+      echo "⚠️ Some issues occurred while running install.py for $repo_name"
+    fi
+  fi
+
+  # Check for setup.py
+  if [ -f "$repo_dir/setup.py" ]; then
+    echo "Found setup.py script for $repo_name, running it..."
+    cd "$repo_dir"
+    ../../venv/bin/python setup.py install
+    local setup_status=$?
+    cd ../..
+
+    if [ $setup_status -eq 0 ]; then
+      echo "✓ setup.py executed successfully for $repo_name"
+    else
+      echo "⚠️ Some issues occurred while running setup.py for $repo_name"
+    fi
+  fi
+}
+
+# Install requirements for each repository
+if [ -d "custom_nodes/comfyui-manager" ]; then
+  install_requirements "custom_nodes/comfyui-manager"
+fi
+
+# Install requirements for other repositories
+for repo_dir in custom_nodes/comfyui_controlnet_aux custom_nodes/ComfyUI-Impact-Pack custom_nodes/ComfyUI_ADV_CLIP_emb custom_nodes/comfyui-reactor-node custom_nodes/ComfyUI_IPAdapter_plus custom_nodes/ComfyUI_essentials custom_nodes/ComfyUI-InstantID custom_nodes/was-node-suite-comfyui; do
+  if [ -d "$repo_dir" ]; then
+    install_requirements "$repo_dir"
+  fi
+done
+
+echo "Custom nodes requirements installation complete."
+
+show_progress "Step 6: Creating convenience shortcuts"
+
+# Create required model directories
+mkdir -p models/checkpoints
+mkdir -p models/clip_vision
+mkdir -p models/vae
+mkdir -p models/loras
+mkdir -p models/controlnet
+mkdir -p models/upscale_models
+mkdir -p models/facerestore_models
+mkdir -p models/ipadapter
+mkdir -p models/instantid/antelopev2
+
+# Create a startup script
+echo "Creating startup script..."
+cat >start_comfyui.sh <<'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+source venv/bin/activate
+python main.py --listen
+EOF
+chmod +x start_comfyui.sh
+
+# Create a desktop shortcut (if desktop directory exists)
+if [ -d "$HOME/Desktop" ]; then
+  echo "Creating desktop shortcut..."
+  cat >"$HOME/Desktop/ComfyUI.desktop" <<EOF
+[Desktop Entry]
+Name=ComfyUI
+Comment=Stable Diffusion GUI
+Exec=bash -c "cd $INSTALL_PATH && ./start_comfyui.sh"
+Terminal=true
+Type=Application
+Icon=
+EOF
+  chmod +x "$HOME/Desktop/ComfyUI.desktop"
+fi
+
+show_progress "=== Setup Complete ==="
+echo "ComfyUI has been successfully set up at: $INSTALL_PATH"
+echo ""
+echo "To start ComfyUI:"
+echo "cd $INSTALL_PATH && ./start_comfyui.sh"
+echo ""
+echo "ComfyUI will be accessible at http://SERVER_IP:8188"
+echo ""
+echo "To activate the virtual environment in the future:"
+echo "cd $INSTALL_PATH && source venv/bin/activate"
+echo ""
+echo "IMPORTANT: To download models, run the install-models script:"
+echo "./install-models $INSTALL_PATH"
