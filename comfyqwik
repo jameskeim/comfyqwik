@@ -27,14 +27,6 @@ check_command() {
   fi
 }
 
-# Function to download models in the background
-download_models() {
-  # This function has been removed.
-  # The models are now downloaded using the separate install-models script
-  echo "This function is deprecated. Please use the separate install-models script."
-  return 1
-}
-
 # Setup cleanup function for graceful exit on Ctrl+C
 cleanup() {
   echo ""
@@ -121,6 +113,20 @@ fi
 
 # Only start downloads after repository is cloned
 show_progress "Step 2: Setting up Python environment and custom nodes in parallel"
+
+# CUDA version selection with a default
+echo ""
+echo "Which CUDA version would you like to use for PyTorch installation?"
+echo "1) CUDA 12.1 (Better compatibility with a wide range of systems) [default]"
+echo "2) CUDA 12.6 (Cutting edge, requires latest drivers)"
+echo "Press Enter for default (CUDA 12.1) or enter 1 or 2:"
+read -t 30 -r cuda_choice || true
+# If no input within 30 seconds or empty input, use default
+if [ -z "$cuda_choice" ]; then
+  cuda_choice="1"
+  echo "No input received, using default: CUDA 12.1"
+fi
+
 # Start the Python environment setup
 (
   echo "Setting up Python virtual environment..."
@@ -137,13 +143,6 @@ show_progress "Step 2: Setting up Python environment and custom nodes in paralle
   # Upgrade pip
   echo "Upgrading pip..."
   pip install --upgrade pip
-
-  # Ask user about CUDA version preference
-  echo ""
-  echo "Which CUDA version would you like to use for PyTorch installation?"
-  echo "1) CUDA 12.1 (Better compatibility with a wide range of systems)"
-  echo "2) CUDA 12.6 (Cutting edge, requires latest drivers)"
-  read -p "Enter your choice (1 or 2): " cuda_choice
 
   if [ "$cuda_choice" == "2" ]; then
     echo "Installing PyTorch with CUDA 12.6 support..."
@@ -214,7 +213,7 @@ PYTHON_SETUP_PID=$!
 ) &
 NODES_SETUP_PID=$!
 
-show_progress "Step 4: Waiting for parallel setups to complete"
+show_progress "Step 3: Waiting for parallel setups to complete"
 echo "Waiting for Python environment and custom nodes setup to complete..."
 
 # Wait for the Python setup to complete
@@ -235,7 +234,7 @@ else
   echo "⚠️ Completed with possible issues"
 fi
 
-show_progress "Step 5: Installing requirements for custom nodes"
+show_progress "Step 4: Installing requirements for custom nodes"
 echo "Installing requirements for each custom node sequentially..."
 
 # Function to install requirements for a repository
@@ -305,7 +304,7 @@ done
 
 echo "Custom nodes requirements installation complete."
 
-show_progress "Step 6: Creating convenience shortcuts"
+show_progress "Step 5: Creating convenience shortcuts"
 
 # Create required model directories
 mkdir -p models/checkpoints
