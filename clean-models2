@@ -1,0 +1,302 @@
+#!/bin/bash
+set -e
+
+# Enhanced ComfyUI Model Cleanup Script
+# This version checks installed_model_downloads.txt to identify and preserve manually installed models
+echo "=== Enhanced ComfyUI Model Cleanup ==="
+
+# Default ComfyUI directory is current directory, but can be specified as argument
+COMFYUI_DIR=${1:-$(pwd)}
+
+# Function to show progress
+show_progress() {
+  local msg="$1"
+  echo ""
+  echo "---------------------------------------------------"
+  echo "  $msg"
+  echo "---------------------------------------------------"
+}
+
+# Check if the specified directory is a ComfyUI directory
+if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
+  echo "ERROR: The specified directory does not appear to be a ComfyUI installation."
+  echo "Please specify a valid ComfyUI directory as an argument."
+  exit 1
+fi
+
+show_progress "Calculating storage space used by models"
+SPACE_BEFORE=$(du -sh "$COMFYUI_DIR/models" | cut -f1)
+echo "Current models directory size: $SPACE_BEFORE"
+
+# Check for installed_model_downloads.txt
+INSTALLED_LIST="$COMFYUI_DIR/installed_model_downloads.txt"
+PROTECT_MANUAL_MODELS=false
+
+if [ -f "$INSTALLED_LIST" ]; then
+  echo "Found installed_model_downloads.txt - can identify automatically installed models"
+  PROTECT_MANUAL_MODELS=true
+else
+  echo "WARNING: installed_model_downloads.txt not found."
+  echo "All model files will be treated as automatically installed."
+  echo "To protect manually installed models, run install-models script first."
+fi
+
+# Create arrays to track files
+declare -a AUTO_INSTALLED_FILES
+declare -a MANUAL_INSTALLED_FILES
+declare -a ALL_MODEL_FILES
+
+# Parse the installed_model_downloads.txt to get list of auto-installed files
+if [ "$PROTECT_MANUAL_MODELS" = true ]; then
+  show_progress "Analyzing installed models database"
+  
+  echo "Parsing installed_model_downloads.txt to identify auto-installed models..."
+  
+  # Create a temporary file to hold model paths
+  AUTO_MODELS_LIST=$(mktemp)
+  
+  while read -r line; do
+    # Skip empty lines and comments
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    
+    # Split the line by pipe character to get URL and destination
+    url=$(echo "$line" | cut -d'|' -f1)
+    dest=$(echo "$line" | cut -d'|' -f2)
+    
+    # Get filename from URL
+    filename=$(basename "$url" | cut -d'?' -f1)
+    
+    # Ensure proper path construction by removing any trailing slash from destination
+    dest="${dest%/}"
+    
+    # Construct the full path and add to our list
+    model_path="$dest/$filename"
+    echo "$model_path" >> "$AUTO_MODELS_LIST"
+    
+    # Add to our array
+    AUTO_INSTALLED_FILES+=("$model_path")
+  done < "$INSTALLED_LIST"
+  
+  echo "Identified $(wc -l < "$AUTO_MODELS_LIST") auto-installed models"
+  
+  # Also handle special IP-Adapter models that have different filenames
+  echo "Checking for special case IP-Adapter models..."
+  
+  # Define an array of special models and their mappings
+  declare -a SPECIAL_MODELS=(
+    "models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    "models/clip_vision/CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
+    "models/clip_vision/clip-vit-large-patch14-336.bin"
+    "models/ipadapter/Kolors-IP-Adapter-Plus.bin"
+    "models/ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin"
+    # Add any other special cases here
+  )
+  
+  # Add all special cases to both the file and array
+  for special_model in "${SPECIAL_MODELS[@]}"; do
+    echo "$special_model" >> "$AUTO_MODELS_LIST"
+    AUTO_INSTALLED_FILES+=("$special_model")
+    echo "Added special case: $special_model"
+  done
+fi
+
+# Now find all model files in the directory
+show_progress "Identifying model files"
+
+# Create a temporary file to store all model files
+ALL_MODELS_LIST=$(mktemp)
+
+echo "Scanning for all model files..."
+# Find all model files and store their paths relative to the models directory
+find "$COMFYUI_DIR/models" -type f \( -name "*.safetensors" -o -name "*.bin" -o -name "*.pth" \
+  -o -name "*.pt" -o -name "*.onnx" -o -name "*.ckpt" -o -name "*.zip" \) -print | while read -r file; do
+  # Get the path relative to COMFYUI_DIR
+  rel_path=${file#$COMFYUI_DIR/}
+  echo "$rel_path" >> "$ALL_MODELS_LIST"
+  ALL_MODEL_FILES+=("$rel_path")
+done
+
+TOTAL_MODEL_COUNT=$(wc -l < "$ALL_MODELS_LIST")
+echo "Found $TOTAL_MODEL_COUNT total model files"
+
+# Identify manually installed models if we have installed_model_downloads.txt
+if [ "$PROTECT_MANUAL_MODELS" = true ]; then
+  # Create a list of manually installed models
+  MANUAL_MODELS_LIST=$(mktemp)
+  
+  # Sort the lists to ensure consistent comparison
+  sort "$AUTO_MODELS_LIST" > "${AUTO_MODELS_LIST}.sorted"
+  sort "$ALL_MODELS_LIST" > "${ALL_MODELS_LIST}.sorted"
+  
+  # Find models that are in ALL_MODELS but not in AUTO_MODELS
+  # Using comm for more reliable difference detection
+  comm -23 "${ALL_MODELS_LIST}.sorted" "${AUTO_MODELS_LIST}.sorted" > "$MANUAL_MODELS_LIST" || true
+  
+  MANUAL_COUNT=$(wc -l < "$MANUAL_MODELS_LIST")
+  echo "Identified $MANUAL_COUNT manually installed models"
+  
+  # Store manual models in our array
+  while read -r model; do
+    MANUAL_INSTALLED_FILES+=("$model")
+  done < "$MANUAL_MODELS_LIST"
+  
+  # Show some examples of manual models if there are any
+  if [ "$MANUAL_COUNT" -gt 0 ]; then
+    echo "Examples of manually installed models:"
+    head -5 "$MANUAL_MODELS_LIST" | while read -r model; do
+      # Check if file actually exists (in case of stale entries)
+      if [ -f "$COMFYUI_DIR/$model" ]; then
+        filesize=$(du -h "$COMFYUI_DIR/$model" | cut -f1)
+        echo "  - $model ($filesize)"
+      else
+        echo "  - $model (not found - may be a stale entry)"
+      fi
+    done
+    if [ "$MANUAL_COUNT" -gt 5 ]; then
+      echo "  ... and $(($MANUAL_COUNT - 5)) more"
+    fi
+  fi
+  
+  # Ask user what to do with manual models
+  if [ "$MANUAL_COUNT" -gt 0 ]; then
+    echo ""
+    echo "Manual model handling options:"
+    echo "1) Delete ALL model files (including manually installed)"
+    echo "2) Delete ONLY auto-installed models (preserve manual models)"
+    echo "3) Show list of manual models before deciding"
+    echo "4) Cancel cleanup operation"
+    echo ""
+    read -p "Enter choice [1-4]: " manual_choice
+    
+    case "$manual_choice" in
+      1)
+        echo "Will delete ALL model files, including manually installed ones"
+        PROTECT_MANUAL_MODELS=false
+        ;;
+      2)
+        echo "Will preserve manually installed models"
+        ;;
+      3)
+        echo ""
+        echo "List of manually installed models that will be preserved:"
+        echo "------------------------------------------------------"
+        cat "$MANUAL_MODELS_LIST"
+        echo "------------------------------------------------------"
+        echo ""
+        read -p "Delete ALL models including these (y) or preserve manual models (n)? " list_choice
+        if [[ "$list_choice" =~ ^[Yy]$ ]]; then
+          PROTECT_MANUAL_MODELS=false
+          echo "Will delete ALL model files, including manually installed ones"
+        else
+          echo "Will preserve manually installed models"
+        fi
+        ;;
+      4)
+        echo "Cleanup operation cancelled."
+        # Cleanup temporary files
+        rm -f "$AUTO_MODELS_LIST" "${AUTO_MODELS_LIST}.sorted" "$ALL_MODELS_LIST" "${ALL_MODELS_LIST}.sorted" "$MANUAL_MODELS_LIST"
+        exit 0
+        ;;
+      *)
+        echo "Invalid choice. Defaulting to preserving manual models."
+        ;;
+    esac
+  fi
+else
+  # Count model files
+  TOTAL_MODEL_COUNT=$(find "$COMFYUI_DIR/models" -type f \( -name "*.safetensors" -o -name "*.bin" -o -name "*.pth" \
+    -o -name "*.pt" -o -name "*.onnx" -o -name "*.ckpt" -o -name "*.zip" \) | wc -l)
+  echo "Number of model files to be removed: $TOTAL_MODEL_COUNT"
+  
+  # Ask for confirmation
+  echo ""
+  echo "WARNING: This will delete all models in $COMFYUI_DIR/models/"
+  echo "These can be restored by running the install-models script again."
+  echo "Are you sure you want to proceed? (y/n)"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Operation cancelled."
+    exit 0
+  fi
+fi
+
+# Now perform the cleanup based on user choices
+show_progress "Cleaning up model files"
+
+if [ "$PROTECT_MANUAL_MODELS" = true ]; then
+  echo "Deleting auto-installed model files only..."
+  # Read the auto-installed list and delete each file
+  while read -r model_path; do
+    full_path="$COMFYUI_DIR/$model_path"
+    if [ -f "$full_path" ]; then
+      echo "Removing: $model_path"
+      rm -f "$full_path"
+    fi
+  done < "$AUTO_MODELS_LIST"
+  
+  echo "Preserved $(wc -l < "$MANUAL_MODELS_LIST") manually installed models"
+else
+  echo "Deleting ALL model files..."
+  # Standard deletion logic (same as original script)
+  find "$COMFYUI_DIR/models" -type f -name "*.safetensors" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.bin" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.pth" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.pt" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.onnx" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.ckpt" -delete
+  find "$COMFYUI_DIR/models" -type f -name "*.zip" -delete
+  
+  echo "Removed all model files"
+fi
+
+# Also clean up any extracted buffalo_l files in insightface
+if [ -d "$COMFYUI_DIR/models/insightface/buffalo_l" ]; then
+  echo "Cleaning up extracted buffalo_l files in insightface directory..."
+  find "$COMFYUI_DIR/models/insightface/buffalo_l" -type f -delete
+fi
+
+# Cleanup temporary files
+rm -f "$AUTO_MODELS_LIST" "${AUTO_MODELS_LIST}.sorted" "$ALL_MODELS_LIST" "${ALL_MODELS_LIST}.sorted" "$MANUAL_MODELS_LIST" 2>/dev/null || true
+
+show_progress "Creating placeholder files"
+
+# Create placeholder files for all subdirectories recursively
+echo "Ensuring all model directories are preserved with placeholders..."
+find "$COMFYUI_DIR/models" -type d -print0 | while IFS= read -r -d '' dir; do
+  touch "$dir/.placeholder"
+  echo "Added placeholder to: ${dir#$COMFYUI_DIR/}"
+done
+
+# Generate a report
+REPORT_FILE="$COMFYUI_DIR/cleanup-report.txt"
+echo "ComfyUI Model Cleanup Report" > "$REPORT_FILE"
+echo "Generated on: $(date)" >> "$REPORT_FILE"
+echo "----------------------------------------" >> "$REPORT_FILE"
+echo "" >> "$REPORT_FILE"
+
+if [ "$PROTECT_MANUAL_MODELS" = true ]; then
+  echo "Cleanup Mode: Selective (preserved manual models)" >> "$REPORT_FILE"
+  echo "Auto-installed models removed: ${#AUTO_INSTALLED_FILES[@]}" >> "$REPORT_FILE"
+  echo "Manual models preserved: ${#MANUAL_INSTALLED_FILES[@]}" >> "$REPORT_FILE"
+else
+  echo "Cleanup Mode: Complete (removed all models)" >> "$REPORT_FILE"
+  echo "Total models removed: $TOTAL_MODEL_COUNT" >> "$REPORT_FILE"
+fi
+
+show_progress "Cleanup Complete!"
+SPACE_AFTER=$(du -sh "$COMFYUI_DIR/models" | cut -f1)
+echo "Models directory size before: $SPACE_BEFORE"
+echo "Models directory size after: $SPACE_AFTER"
+echo ""
+echo "A cleanup report has been generated at: $REPORT_FILE"
+echo ""
+
+if [ "$PROTECT_MANUAL_MODELS" = true ] && [ "${#MANUAL_INSTALLED_FILES[@]}" -gt 0 ]; then
+  echo "You have successfully removed the auto-installed model files while preserving manually installed models."
+else
+  echo "You have successfully removed all model files to save storage costs."
+fi
+
+echo "To restore them for your next session, run: ./install-models"
