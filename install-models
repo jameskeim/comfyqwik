@@ -51,6 +51,7 @@ mkdir -p "$COMFYUI_DIR/models/upscale_models"
 mkdir -p "$COMFYUI_DIR/models/facerestore_models"
 mkdir -p "$COMFYUI_DIR/models/ipadapter"
 mkdir -p "$COMFYUI_DIR/models/instantid/antelopev2"
+mkdir -p "$COMFYUI_DIR/models/insightface"
 
 show_progress "Starting model downloads"
 echo "Using $MAX_PARALLEL_DOWNLOADS parallel downloads (based on $AVAILABLE_CORES CPU cores)"
@@ -100,6 +101,48 @@ cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c
 # Clean up
 rm "$DOWNLOAD_COMMANDS_FILE"
 
+# ====================================================
+# IPAdapter Special Case Handling
+# ====================================================
+# This section handles models that require specific renaming for the IPAdapter's Unified Loader
+
+show_progress "Downloading IPAdapter models that require special naming"
+
+# Array of source URLs and destination filenames
+declare -a ipa_special_models=(
+  "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+  "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/image_encoder/pytorch_model.bin|models/clip_vision/clip-vit-large-patch14-336.bin"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin|models/ipadapter/Kolors-IP-Adapter-Plus.bin"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin|models/ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin"
+)
+
+# Create a temporary file for download commands
+IPA_DOWNLOAD_COMMANDS_FILE=$(mktemp)
+
+# Process each URL and destination pair
+for pair in "${ipa_special_models[@]}"; do
+  url=$(echo "$pair" | cut -d'|' -f1)
+  dest=$(echo "$pair" | cut -d'|' -f2)
+
+  # Get filename for better logging
+  filename=$(basename "$dest")
+
+  # Add the download command to our commands file
+  echo "cd \"$COMFYUI_DIR\" && wget -q -c \"$url\" -O \"./$(echo $dest)\" --show-progress && echo \"Downloaded and renamed: $filename\"" >>"$IPA_DOWNLOAD_COMMANDS_FILE"
+done
+
+# Count total special downloads
+TOTAL_IPA_DOWNLOADS=$(wc -l <"$IPA_DOWNLOAD_COMMANDS_FILE")
+echo "Starting $TOTAL_IPA_DOWNLOADS special downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
+
+# Execute downloads with xargs
+cat "$IPA_DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}"
+
+# Clean up
+rm "$IPA_DOWNLOAD_COMMANDS_FILE"
+
 show_progress "Download Complete!"
 echo "All models have been downloaded to $COMFYUI_DIR/models/"
+echo "IPAdapter models have been properly renamed for the Unified Loader."
 echo "You can now start using ComfyUI with all the downloaded models."

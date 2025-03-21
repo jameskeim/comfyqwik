@@ -1,7 +1,8 @@
 # SDXL Models and VAEs
 https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors|models/checkpoints/
 https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors|models/checkpoints/
-https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors|models/checkpoints/
+https://huggingface.co/RunDiffusion/Juggernaut-X-v10/resolve/main/Juggernaut-X-RunDiffusion-NSFW.safetensors|models/checkpoints/
+https://huggingface.co/RunDiffusion/Juggernaut-X-v10/resolve/main/vae/diffusion_pytorch_model.bin|models/vae/
 https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2_1.safetensors|models/checkpoints/
 https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors|models/clip_vision/
 https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors|models/vae/
@@ -35,25 +36,44 @@ https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/RestoreFormer.pth|models/fac
 https://huggingface.co/TECHTENZ/GFPGAN/resolve/main/codeformer.pth|models/facerestore_models/
 
 # IP-Adapter Models
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light_v11.bin|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_vit-G.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-composition_sd15.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15_light.safetensors|models/ipadapter/
-
-# IP-Adapter SDXL Models
-https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin|models/ipadapter/
-https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition_sdxl_vit-h.safetensors|models/ipadapter/
 https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-composition-sdxl_vit-h.safetensors|models/ipadapter/
 
+# IP-Adapter FaceID Models
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait-v11_sd15.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl.bin|models/ipadapter/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl_unnorm.bin|models/ipadapter/
+
+# IP-Adapter FaceID LoRAs
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15_lora.safetensors|models/loras/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15_lora.safetensors|models/loras/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl_lora.safetensors|models/loras/
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors|models/loras/
+
+# IP-Adapter Community Models
+https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sd15.safetensors|models/ipadapter/
+https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sdxl.safetensors|models/ipadapter/
+
 # FLUX Models
-https://huggingface.co/NetsPresso/flex-sd15/resolve/main/flux_sd15.safetensors|models/checkpoints/
-https://huggingface.co/NetsPresso/flex-sdxl/resolve/main/flux_sdxl.safetensors|models/checkpoints/
+# https://huggingface.co/NetsPresso/flex-sd15/resolve/main/flux_sd15.safetensors|models/checkpoints/
+# https://huggingface.co/NetsPresso/flex-sdxl/resolve/main/flux_sdxl.safetensors|models/checkpoints/
 
 # Style & Creative Tools Models
 https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1/resolve/main/Realistic_Vision_V6B1.safetensors|models/checkpoints/
