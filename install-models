@@ -153,75 +153,148 @@ show_progress "Installing ReActor models"
 
 # Create temporary directory for the repository
 TEMP_DIR="$COMFYUI_DIR/temp_reactor_repo"
+echo "Creating temporary directory at $TEMP_DIR"
+rm -rf "$TEMP_DIR" # Clean up any existing temp dir
 mkdir -p "$TEMP_DIR"
 
 # Check if git-lfs is installed
 if ! command -v git-lfs &>/dev/null; then
-  echo "Git LFS is not installed. Attempting to install..."
-  if command -v apt-get &>/dev/null; then
-    sudo apt-get update && sudo apt-get install -y git-lfs
-  elif command -v yum &>/dev/null; then
-    sudo yum install -y git-lfs
-  elif command -v brew &>/dev/null; then
-    brew install git-lfs
+  echo "ERROR: Git LFS is not installed. This is required for ReActor models."
+  echo "Please install Git LFS manually: https://git-lfs.github.com/"
+  echo "After installing, run: git lfs install"
+  echo "Skipping ReActor models installation..."
+else
+  echo "Git LFS is installed. Attempting to initialize..."
+  # Initialize Git LFS with verbose output
+  git lfs install --verbose
+  echo "Git LFS initialization completed with status: $?"
+
+  # Clone the repository with more verbose output
+  echo "Cloning ReActor models repository (this may take some time)..."
+  echo "Using repository: https://huggingface.co/datasets/Gourieff/ReActor"
+
+  # Try cloning with more detailed output
+  if git clone --verbose https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR" 2>&1; then
+    echo "Repository cloned successfully."
+
+    # Verify directory structure
+    echo "Checking repository structure..."
+    find "$TEMP_DIR" -type d -maxdepth 2 | sort
+
+    # Verify if models directory exists and what it contains
+    if [ -d "$TEMP_DIR/models" ]; then
+      echo "Models directory found. Contents:"
+      find "$TEMP_DIR/models" -type f -maxdepth 1 | sort
+
+      # Copy inswapper models to insightface directory
+      echo "Copying inswapper models..."
+      if [ -f "$TEMP_DIR/models/inswapper_128.onnx" ]; then
+        echo "Found inswapper_128.onnx, copying..."
+        cp -v "$TEMP_DIR/models/inswapper_128.onnx" "$COMFYUI_DIR/models/insightface/"
+      else
+        echo "ERROR: inswapper_128.onnx not found in $TEMP_DIR/models/"
+      fi
+
+      if [ -f "$TEMP_DIR/models/inswapper_128_fp16.onnx" ]; then
+        echo "Found inswapper_128_fp16.onnx, copying..."
+        cp -v "$TEMP_DIR/models/inswapper_128_fp16.onnx" "$COMFYUI_DIR/models/insightface/"
+      else
+        echo "ERROR: inswapper_128_fp16.onnx not found in $TEMP_DIR/models/"
+      fi
+
+      # Copy reswapper models with explicit checks
+      echo "Copying reswapper models..."
+      if [ -f "$TEMP_DIR/models/reswapper_128.onnx" ]; then
+        echo "Found reswapper_128.onnx, copying..."
+        cp -v "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/"
+      else
+        echo "WARNING: reswapper_128.onnx not found in $TEMP_DIR/models/"
+      fi
+
+      if [ -f "$TEMP_DIR/models/reswapper_256.onnx" ]; then
+        echo "Found reswapper_256.onnx, copying..."
+        cp -v "$TEMP_DIR/models/reswapper_256.onnx" "$COMFYUI_DIR/models/reswapper/"
+      else
+        echo "WARNING: reswapper_256.onnx not found in $TEMP_DIR/models/"
+      fi
+
+      # Check face restoration models directory
+      echo "Checking face restoration models..."
+      if [ -d "$TEMP_DIR/models/facerestore_models" ]; then
+        echo "Face restoration models directory found. Contents:"
+        find "$TEMP_DIR/models/facerestore_models" -type f | sort
+        echo "Copying face restoration models..."
+        cp -v "$TEMP_DIR/models/facerestore_models/"* "$COMFYUI_DIR/models/facerestore_models/" 2>/dev/null || echo "Warning: No files copied from facerestore_models"
+      else
+        echo "WARNING: facerestore_models directory not found in $TEMP_DIR/models/"
+      fi
+
+      # Check detection/bbox directory
+      echo "Checking face detection model..."
+      if [ -f "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" ]; then
+        echo "Found face_yolov8m.pt, copying..."
+        cp -v "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" "$COMFYUI_DIR/models/ultralytics/bbox/"
+      else
+        echo "WARNING: Directory structure for detection models is different than expected."
+        echo "Looking for detection models in alternate locations..."
+        find "$TEMP_DIR" -name "face_yolov8m.pt" | while read f; do
+          echo "Found at $f, copying..."
+          cp -v "$f" "$COMFYUI_DIR/models/ultralytics/bbox/"
+        done
+      fi
+
+      # Check SAMs directory
+      echo "Checking SAM models..."
+      if [ -d "$TEMP_DIR/models/sams" ]; then
+        echo "SAM models directory found. Contents:"
+        find "$TEMP_DIR/models/sams" -type f | sort
+        echo "Copying SAM models..."
+        cp -v "$TEMP_DIR/models/sams/"* "$COMFYUI_DIR/models/sams/" 2>/dev/null || echo "Warning: No files copied from sams directory"
+      else
+        echo "WARNING: sams directory not found in $TEMP_DIR/models/"
+      fi
+
+      # Check buffalo_l.zip
+      echo "Checking buffalo_l model..."
+      if [ -f "$TEMP_DIR/models/buffalo_l.zip" ]; then
+        echo "Found buffalo_l.zip, extracting..."
+        unzip -v "$TEMP_DIR/models/buffalo_l.zip" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract buffalo_l.zip"
+      else
+        echo "WARNING: buffalo_l.zip not found in $TEMP_DIR/models/"
+        echo "Looking for buffalo_l model in alternate formats or locations..."
+        find "$TEMP_DIR" -name "buffalo_l*" | while read f; do
+          echo "Found at $f, copying..."
+          if [[ "$f" == *.zip ]]; then
+            unzip -v "$f" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract $(basename $f)"
+          else
+            cp -rv "$f" "$COMFYUI_DIR/models/insightface/"
+          fi
+        done
+      fi
+    else
+      echo "ERROR: Models directory not found in the cloned repository."
+      echo "Directory contents:"
+      ls -la "$TEMP_DIR"
+    fi
+
+    # Clean up
+    echo "Cleaning up temporary ReActor files..."
+    rm -rf "$TEMP_DIR"
+
   else
-    echo "WARNING: Could not automatically install Git LFS. Some large files may not download correctly."
-    echo "Please install Git LFS manually: https://git-lfs.github.com/"
+    echo "ERROR: Failed to clone ReActor repository."
+    echo "Try running this command manually to see detailed errors:"
+    echo "git clone https://huggingface.co/datasets/Gourieff/ReActor $TEMP_DIR"
   fi
 fi
 
-# Initialize Git LFS
-git lfs install
-
-# Clone the repository
-echo "Cloning ReActor models repository (this may take some time)..."
-git clone https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"
-
-if [ ! -d "$TEMP_DIR/models" ]; then
-  echo "Warning: Failed to clone ReActor repository or models directory not found"
-  echo "Continuing with regular downloads..."
+# Check if any ReActor models were installed
+echo "Checking if ReActor models were successfully installed..."
+if [ -f "$COMFYUI_DIR/models/insightface/inswapper_128.onnx" ]; then
+  echo "✓ ReActor models installed successfully"
 else
-  # Copy inswapper models to insightface directory
-  echo "Copying inswapper models..."
-  cp "$TEMP_DIR/models/inswapper_128.onnx" "$COMFYUI_DIR/models/insightface/" 2>/dev/null || echo "Warning: inswapper_128.onnx not found"
-  cp "$TEMP_DIR/models/inswapper_128_fp16.onnx" "$COMFYUI_DIR/models/insightface/" 2>/dev/null || echo "Warning: inswapper_128_fp16.onnx not found"
-
-  # Copy reswapper models
-  echo "Copying reswapper models..."
-  if [ -f "$TEMP_DIR/models/reswapper_128.onnx" ]; then
-    cp "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/"
-  fi
-  if [ -f "$TEMP_DIR/models/reswapper_256.onnx" ]; then
-    cp "$TEMP_DIR/models/reswapper_256.onnx" "$COMFYUI_DIR/models/reswapper/"
-  fi
-
-  # Copy face restoration models
-  echo "Copying face restoration models..."
-  if [ -d "$TEMP_DIR/models/facerestore_models" ]; then
-    cp "$TEMP_DIR/models/facerestore_models/"* "$COMFYUI_DIR/models/facerestore_models/" 2>/dev/null
-  fi
-
-  # Copy face detection model
-  echo "Copying face detection model..."
-  if [ -f "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" ]; then
-    cp "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" "$COMFYUI_DIR/models/ultralytics/bbox/"
-  fi
-
-  # Copy SAM models
-  echo "Copying SAM models..."
-  if [ -d "$TEMP_DIR/models/sams" ]; then
-    cp "$TEMP_DIR/models/sams/"* "$COMFYUI_DIR/models/sams/" 2>/dev/null
-  fi
-
-  # Extract buffalo_l.zip if needed for insightface
-  echo "Extracting buffalo_l model..."
-  if [ -f "$TEMP_DIR/models/buffalo_l.zip" ]; then
-    unzip -o "$TEMP_DIR/models/buffalo_l.zip" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract buffalo_l.zip"
-  fi
-
-  # Clean up
-  echo "Cleaning up temporary ReActor files..."
-  rm -rf "$TEMP_DIR"
+  echo "⚠️ No ReActor models were installed. You may need to install them manually."
+  echo "Visit: https://huggingface.co/datasets/Gourieff/ReActor for downloads"
 fi
 
 show_progress "Download Complete!"
