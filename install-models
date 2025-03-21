@@ -52,6 +52,10 @@ mkdir -p "$COMFYUI_DIR/models/facerestore_models"
 mkdir -p "$COMFYUI_DIR/models/ipadapter"
 mkdir -p "$COMFYUI_DIR/models/instantid/antelopev2"
 mkdir -p "$COMFYUI_DIR/models/insightface"
+mkdir -p "$COMFYUI_DIR/models/ultralytics/bbox"
+mkdir -p "$COMFYUI_DIR/models/sams"
+mkdir -p "$COMFYUI_DIR/models/reactor/faces"
+mkdir -p "$COMFYUI_DIR/models/reswapper"
 
 show_progress "Starting model downloads"
 echo "Using $MAX_PARALLEL_DOWNLOADS parallel downloads (based on $AVAILABLE_CORES CPU cores)"
@@ -142,7 +146,86 @@ cat "$IPA_DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bas
 # Clean up
 rm "$IPA_DOWNLOAD_COMMANDS_FILE"
 
+# ====================================================
+# ReActor Models Installation
+# ====================================================
+show_progress "Installing ReActor models"
+
+# Create temporary directory for the repository
+TEMP_DIR="$COMFYUI_DIR/temp_reactor_repo"
+mkdir -p "$TEMP_DIR"
+
+# Check if git-lfs is installed
+if ! command -v git-lfs &>/dev/null; then
+  echo "Git LFS is not installed. Attempting to install..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update && sudo apt-get install -y git-lfs
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y git-lfs
+  elif command -v brew &>/dev/null; then
+    brew install git-lfs
+  else
+    echo "WARNING: Could not automatically install Git LFS. Some large files may not download correctly."
+    echo "Please install Git LFS manually: https://git-lfs.github.com/"
+  fi
+fi
+
+# Initialize Git LFS
+git lfs install
+
+# Clone the repository
+echo "Cloning ReActor models repository (this may take some time)..."
+git clone https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"
+
+if [ ! -d "$TEMP_DIR/models" ]; then
+  echo "Warning: Failed to clone ReActor repository or models directory not found"
+  echo "Continuing with regular downloads..."
+else
+  # Copy inswapper models to insightface directory
+  echo "Copying inswapper models..."
+  cp "$TEMP_DIR/models/inswapper_128.onnx" "$COMFYUI_DIR/models/insightface/" 2>/dev/null || echo "Warning: inswapper_128.onnx not found"
+  cp "$TEMP_DIR/models/inswapper_128_fp16.onnx" "$COMFYUI_DIR/models/insightface/" 2>/dev/null || echo "Warning: inswapper_128_fp16.onnx not found"
+
+  # Copy reswapper models
+  echo "Copying reswapper models..."
+  if [ -f "$TEMP_DIR/models/reswapper_128.onnx" ]; then
+    cp "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/"
+  fi
+  if [ -f "$TEMP_DIR/models/reswapper_256.onnx" ]; then
+    cp "$TEMP_DIR/models/reswapper_256.onnx" "$COMFYUI_DIR/models/reswapper/"
+  fi
+
+  # Copy face restoration models
+  echo "Copying face restoration models..."
+  if [ -d "$TEMP_DIR/models/facerestore_models" ]; then
+    cp "$TEMP_DIR/models/facerestore_models/"* "$COMFYUI_DIR/models/facerestore_models/" 2>/dev/null
+  fi
+
+  # Copy face detection model
+  echo "Copying face detection model..."
+  if [ -f "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" ]; then
+    cp "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" "$COMFYUI_DIR/models/ultralytics/bbox/"
+  fi
+
+  # Copy SAM models
+  echo "Copying SAM models..."
+  if [ -d "$TEMP_DIR/models/sams" ]; then
+    cp "$TEMP_DIR/models/sams/"* "$COMFYUI_DIR/models/sams/" 2>/dev/null
+  fi
+
+  # Extract buffalo_l.zip if needed for insightface
+  echo "Extracting buffalo_l model..."
+  if [ -f "$TEMP_DIR/models/buffalo_l.zip" ]; then
+    unzip -o "$TEMP_DIR/models/buffalo_l.zip" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract buffalo_l.zip"
+  fi
+
+  # Clean up
+  echo "Cleaning up temporary ReActor files..."
+  rm -rf "$TEMP_DIR"
+fi
+
 show_progress "Download Complete!"
 echo "All models have been downloaded to $COMFYUI_DIR/models/"
 echo "IPAdapter models have been properly renamed for the Unified Loader."
+echo "ReActor models have been installed."
 echo "You can now start using ComfyUI with all the downloaded models."
