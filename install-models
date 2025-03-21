@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Improved ComfyUI Model Installer
-# This script addresses common issues with downloading models
-echo "=== ComfyUI Enhanced Model Downloader ==="
+# Simplified ComfyUI Model Installer - Fixes syntax error issues
+# This version uses a simpler approach to parallel downloading
+echo "=== ComfyUI Enhanced Model Downloader (Simplified Version) ==="
 
 # Get the directory where the script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_MODE=false
 COMFYUI_DIR=""
 VERBOSE=false
+FAILED_MODE=false
 
 # Parse command-line arguments
 for arg in "$@"; do
@@ -20,14 +21,7 @@ for arg in "$@"; do
   elif [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
     VERBOSE=true
   elif [ "$arg" = "--failed" ]; then
-    # Use the failed_downloads.txt file instead
-    if [ -f "failed_downloads.txt" ]; then
-      DOWNLOAD_LIST="$(pwd)/failed_downloads.txt"
-      echo "Using failed_downloads.txt to retry failed downloads"
-    else
-      echo "failed_downloads.txt not found. Please run the script normally first."
-      exit 1
-    fi
+    FAILED_MODE=true
   elif [ "$arg" != "--test" ] && [ "$arg" != "--verbose" ] && [ "$arg" != "-v" ] && [ "$arg" != "--failed" ]; then
     COMFYUI_DIR="$arg"
   fi
@@ -42,7 +36,7 @@ else
 fi
 
 # Determine optimal number of parallel downloads based on CPU cores
-AVAILABLE_CORES=$(nproc 2>/dev/null || echo 4)
+AVAILABLE_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 MAX_PARALLEL_DOWNLOADS=$((AVAILABLE_CORES * 3 / 4))
 MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS < 4 ? 4 : MAX_PARALLEL_DOWNLOADS))
 MAX_PARALLEL_DOWNLOADS=$((MAX_PARALLEL_DOWNLOADS > 32 ? 32 : MAX_PARALLEL_DOWNLOADS))
@@ -63,22 +57,6 @@ if [ "$TEST_MODE" = false ]; then
     echo "Creating it now..."
     mkdir -p "$COMFYUI_DIR"
   fi
-  
-  if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
-    echo "WARNING: The specified directory does not appear to be a ComfyUI installation."
-    echo "This script will create the necessary model directories, but ComfyUI itself might not be installed."
-    echo "To bypass this warning, use the --test flag."
-    echo ""
-    echo "Would you like to continue anyway? (y/n)"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-      echo "Setup aborted."
-      exit 1
-    fi
-  fi
-else
-  echo "Running in TEST MODE - ComfyUI directory check bypassed"
-  echo "Using directory: $COMFYUI_DIR"
 fi
 
 show_progress "Creating model directories"
@@ -98,29 +76,8 @@ mkdir -p "$COMFYUI_DIR/models/sams" || echo "Warning: Could not create sams dire
 mkdir -p "$COMFYUI_DIR/models/reactor/faces" || echo "Warning: Could not create reactor/faces directory"
 mkdir -p "$COMFYUI_DIR/models/reswapper" || echo "Warning: Could not create reswapper directory"
 
-# Check if all directories were created
-echo "Verifying directories..."
-ALL_DIRS_CREATED=true
-for dir in "checkpoints" "clip_vision" "vae" "loras" "controlnet" "upscale_models" "facerestore_models" "ipadapter" "instantid/antelopev2" "insightface" "ultralytics/bbox" "sams" "reactor/faces" "reswapper"; do
-  if [ ! -d "$COMFYUI_DIR/models/$dir" ]; then
-    echo "ERROR: Failed to create directory: $COMFYUI_DIR/models/$dir"
-    ALL_DIRS_CREATED=false
-  fi
-done
-
-if [ "$ALL_DIRS_CREATED" = false ]; then
-  echo "WARNING: Some directories failed to create. This might cause download failures."
-  echo "Please check your file permissions and disk space."
-  echo "Would you like to continue anyway? (y/n)"
-  read -r response
-  if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo "Setup aborted."
-    exit 1
-  fi
-fi
-
 # Check for wget
-if ! command -v wget &> /dev/null; then
+if ! command -v wget &>/dev/null; then
   echo "ERROR: wget is not installed. Please install wget to use this script."
   echo "On Ubuntu/Debian: sudo apt-get install wget"
   echo "On CentOS/RHEL: sudo yum install wget"
@@ -144,7 +101,7 @@ declare -a ipa_special_models=(
   "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin|models/ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin"
 )
 
-# Process each URL and destination pair - doing these sequentially for better visibility
+# Process each URL and destination pair sequentially
 echo "Processing ${#ipa_special_models[@]} special case IPAdapter models sequentially..."
 
 for pair in "${ipa_special_models[@]}"; do
@@ -154,7 +111,7 @@ for pair in "${ipa_special_models[@]}"; do
   # Get filename for better logging
   filename=$(basename "$dest")
   full_path="$COMFYUI_DIR/$dest"
-  
+
   # Make sure the directory exists
   mkdir -p "$(dirname "$full_path")"
 
@@ -170,38 +127,87 @@ done
 echo "All IPAdapter special case models have been processed."
 
 # ====================================================
-# Main Model Downloads - With Clean Success/Failure Reporting
+# Main Model Downloads - Simplified approach
 # ====================================================
 show_progress "Starting main model downloads"
 echo "Using $MAX_PARALLEL_DOWNLOADS parallel downloads (based on $AVAILABLE_CORES CPU cores)"
 
-# Check if download list exists
-DOWNLOAD_LIST="$SCRIPT_DIR/model_downloads.txt"
-if [ ! -f "$DOWNLOAD_LIST" ]; then
-  echo "ERROR: $DOWNLOAD_LIST not found!"
-  echo "Please ensure the model_downloads.txt file is in the same directory as this script."
-  exit 1
+# Determine which file to use for downloads
+if [ "$FAILED_MODE" = true ] && [ -f "$COMFYUI_DIR/failed_downloads.txt" ]; then
+  DOWNLOAD_LIST="$COMFYUI_DIR/failed_downloads.txt"
+  echo "Using failed_downloads.txt to retry failed downloads"
+else
+  # Check if download list exists
+  DOWNLOAD_LIST="$SCRIPT_DIR/model_downloads.txt"
+  if [ ! -f "$DOWNLOAD_LIST" ]; then
+    echo "ERROR: $DOWNLOAD_LIST not found!"
+    echo "Please ensure the model_downloads.txt file is in the same directory as this script."
+    exit 1
+  fi
 fi
 
-# Create a temporary file to hold download commands
-DOWNLOAD_COMMANDS_FILE=$(mktemp)
-# Create a temporary directory to store success/failure logs
-TEMP_LOG_DIR=$(mktemp -d)
+# Create temporary directories for tracking
+TEMP_DIR=$(mktemp -d)
+SUCCESS_DIR="$TEMP_DIR/success"
+FAIL_DIR="$TEMP_DIR/fail"
+LOG_DIR="$TEMP_DIR/logs"
+SECTION_DIR="$TEMP_DIR/sections"
+mkdir -p "$SUCCESS_DIR" "$FAIL_DIR" "$LOG_DIR" "$SECTION_DIR"
 
-# Read the download list and create wget commands
-SECTION=""
+# Create a download script for each URL
+DOWNLOAD_SCRIPT="$TEMP_DIR/download.sh"
+cat >"$DOWNLOAD_SCRIPT" <<'EOF'
+#!/bin/bash
+url="$1"
+dest="$2"
+comfyui_dir="$3"
+temp_dir="$4"
+section="$5"
+verbose="$6"
+
+# Create a unique ID for this download
+id=$(echo "$url" | md5sum | cut -d' ' -f1)
+filename=$(basename "$url" | cut -d'?' -f1)
+
+# Create destination directory
+mkdir -p "$comfyui_dir/$dest"
+
+# Set wget options
+if [ "$verbose" = "true" ]; then
+  wget_opts="-c"
+else
+  wget_opts="-q -c"
+fi
+
+# Perform the download
+if cd "$comfyui_dir" && wget $wget_opts "$url" -P "./$dest" > "$temp_dir/logs/$id.log" 2>&1; then
+  echo "$dest/$filename" > "$temp_dir/success/$id"
+else
+  echo "$dest/$filename" > "$temp_dir/fail/$id"
+  echo "$url" >> "$temp_dir/fail/$id"
+  echo "$section" > "$temp_dir/sections/$id"
+fi
+EOF
+
+chmod +x "$DOWNLOAD_SCRIPT"
+
+# Create a list of download commands
+DOWNLOAD_LIST_FILE="$TEMP_DIR/downloads.txt"
+touch "$DOWNLOAD_LIST_FILE"
+
+# Read the download list and create download commands
+CURRENT_SECTION="Uncategorized"
+TOTAL_DOWNLOADS=0
+
 while read -r line; do
-  # Skip empty lines
-  if [[ -z "$line" ]]; then
-    continue
-  fi
-  
   # Handle section comments
   if [[ "$line" == \#* ]]; then
-    # If it's a comment, store it as a section header and print it
-    SECTION="$line"
-    echo ""
-    echo "$SECTION"
+    CURRENT_SECTION="$line"
+    continue
+  fi
+
+  # Skip empty lines
+  if [[ -z "$line" ]]; then
     continue
   fi
 
@@ -209,297 +215,322 @@ while read -r line; do
   url=$(echo "$line" | cut -d'|' -f1)
   dest=$(echo "$line" | cut -d'|' -f2)
 
-  # Get filename for tracking
-  filename=$(basename "$url" | cut -d'?' -f1)
-
-  # Create a unique log identifier
-  log_id=$(echo "$url" | md5sum | cut -d' ' -f1)
-
-  # First ensure the directory exists
-  mkdir_cmd="mkdir -p \"$COMFYUI_DIR/$dest\""
-  
-  # Prepare wget options
-  wget_opts="-q -c"
-  if [ "$VERBOSE" = true ]; then
-    wget_opts="-c"  # More verbose output
-  fi
-
-  # Add the download command to our commands file with success/failure reporting
-  echo "$mkdir_cmd && cd \"$COMFYUI_DIR\" && wget $wget_opts \"$url\" -P \"./$(echo $dest)\" > \"$TEMP_LOG_DIR/$log_id.log\" 2>&1 && echo \"$dest/$filename --> Complete\" > \"$TEMP_LOG_DIR/$log_id.success\" || { echo \"$dest/$filename --> Failed\" > \"$TEMP_LOG_DIR/$log_id.fail\"; echo \"$url\" >> \"$TEMP_LOG_DIR/$log_id.fail\"; echo \"$SECTION\" >> \"$TEMP_LOG_DIR/$log_id.section\"; }" >>"$DOWNLOAD_COMMANDS_FILE"
+  # Add to download list
+  echo "$url|$dest|$CURRENT_SECTION" >>"$DOWNLOAD_LIST_FILE"
+  TOTAL_DOWNLOADS=$((TOTAL_DOWNLOADS + 1))
 done <"$DOWNLOAD_LIST"
 
-# Count total downloads
-TOTAL_DOWNLOADS=$(wc -l <"$DOWNLOAD_COMMANDS_FILE")
-echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes..."
-echo "This may take a while depending on your internet connection speed."
-echo "Download results will be reported when complete."
+echo "Prepared $TOTAL_DOWNLOADS downloads"
 
-# Execute downloads with xargs for better parallelism
-cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}"
+# Function to process the download list in batches
+process_downloads() {
+  local batch_size="$1"
+  local current=0
+
+  while read -r entry; do
+    url=$(echo "$entry" | cut -d'|' -f1)
+    dest=$(echo "$entry" | cut -d'|' -f2)
+    section=$(echo "$entry" | cut -d'|' -f3)
+
+    "$DOWNLOAD_SCRIPT" "$url" "$dest" "$COMFYUI_DIR" "$TEMP_DIR" "$section" "$VERBOSE" &
+
+    current=$((current + 1))
+    if [ "$current" -ge "$batch_size" ]; then
+      wait
+      current=0
+    fi
+  done <"$DOWNLOAD_LIST_FILE"
+
+  # Wait for any remaining downloads
+  wait
+}
+
+# Start the downloads
+echo "Starting downloads with $MAX_PARALLEL_DOWNLOADS parallel processes..."
+process_downloads "$MAX_PARALLEL_DOWNLOADS"
+
+# Count results
+SUCCESS_COUNT=$(ls -1 "$SUCCESS_DIR" 2>/dev/null | wc -l)
+FAILURE_COUNT=$(ls -1 "$FAIL_DIR" 2>/dev/null | wc -l)
 
 # Process and display results
 echo ""
 echo "Download Results:"
 echo "-----------------"
 
-# Initialize model report file
-REPORT_FILE="$COMFYUI_DIR/model-report.txt"
-echo "ComfyUI Model Installation Report" > "$REPORT_FILE"
-echo "Generated on: $(date)" >> "$REPORT_FILE"
-echo "----------------------------------------" >> "$REPORT_FILE"
-echo "" >> "$REPORT_FILE"
+if [ "$SUCCESS_COUNT" -gt 0 ]; then
+  echo "✓ Successfully downloaded $SUCCESS_COUNT models"
 
-# Create a structure to organize models by directory
-declare -A MODELS_BY_DIR
-declare -A FAILED_BY_DIR
-
-# Count successful downloads and categorize by directory
-SUCCESS_COUNT=0
-if ls "$TEMP_LOG_DIR"/*.success 1>/dev/null 2>&1; then
-  SUCCESS_COUNT=$(ls -1 "$TEMP_LOG_DIR"/*.success 2>/dev/null | wc -l)
-  
-  # Process each success file and organize by directory
-  for success_file in "$TEMP_LOG_DIR"/*.success; do
-    content=$(cat "$success_file")
-    # Extract directory and filename
-    if [[ "$content" =~ ([^/]+/[^/]+)/([^[:space:]]+)\ --> ]]; then
-      dir="${BASH_REMATCH[1]}"
-      file="${BASH_REMATCH[2]}"
-      
-      # Add to our directory-based collection
-      if [[ -z "${MODELS_BY_DIR[$dir]}" ]]; then
-        MODELS_BY_DIR[$dir]="$file"
-      else
-        MODELS_BY_DIR[$dir]="${MODELS_BY_DIR[$dir]}"$'\n'"$file"
-      fi
-    fi
-  done
-  
-  if [ "$SUCCESS_COUNT" -gt 0 ]; then
-    echo "✓ Successfully downloaded $SUCCESS_COUNT models"
-    
-    if [ "$VERBOSE" = true ]; then
-      echo ""
-      echo "Successful Downloads:"
-      echo "--------------------"
-      cat "$TEMP_LOG_DIR"/*.success | sort
-    fi
+  if [ "$VERBOSE" = true ]; then
+    echo ""
+    echo "Successful Downloads:"
+    echo "--------------------"
+    for file in "$SUCCESS_DIR"/*; do
+      cat "$file"
+    done
   fi
 fi
 
-# Print failed downloads and their error messages
-FAILURE_COUNT=0
-# Create an associative array to store error messages
-declare -A ERROR_MESSAGES
+# Collect failed downloads
+if [ "$FAILURE_COUNT" -gt 0 ]; then
+  echo ""
+  echo "✗ Failed Downloads: $FAILURE_COUNT"
+  echo "--------------------"
 
-if ls "$TEMP_LOG_DIR"/*.fail 1>/dev/null 2>&1; then
-  FAILURE_COUNT=$(ls -1 "$TEMP_LOG_DIR"/*.fail 2>/dev/null | wc -l)
-  
-  # Process each failure file
-  for fail_file in "$TEMP_LOG_DIR"/*.fail; do
-    # First line contains the file path
-    file_path=$(head -1 "$fail_file")
-    # Second line contains the URL
-    url=$(tail -1 "$fail_file")
-    
-    # Extract directory and filename
-    if [[ "$file_path" =~ ([^/]+/[^/]+)/([^[:space:]]+)\ --> ]]; then
-      dir="${BASH_REMATCH[1]}"
-      file="${BASH_REMATCH[2]}"
-      
-      # Get error message if available
-      log_id=$(basename "$fail_file" .fail)
-      error_log="$TEMP_LOG_DIR/$log_id.log"
-      error_msg=""
-      
-      if [ -f "$error_log" ]; then
-        # Extract meaningful error messages (up to 3 lines)
-        error_msg=$(grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$error_log" | head -3)
-        # If nothing specific found, just take the last few lines which often contain error info
-        if [ -z "$error_msg" ]; then
-          error_msg=$(tail -3 "$error_log")
-        fi
-      fi
-      
-      # Add error message to our collection
-      key="${file}|${url}"
-      ERROR_MESSAGES["$key"]="$error_msg"
-      
-      # Add to our directory-based failures collection
-      if [[ -z "${FAILED_BY_DIR[$dir]}" ]]; then
-        FAILED_BY_DIR[$dir]="$file|$url"
-      else
-        FAILED_BY_DIR[$dir]="${FAILED_BY_DIR[$dir]}"
+  for file in "$FAIL_DIR"/*; do
+    id=$(basename "$file")
+    path=$(head -1 "$file")
+    url=$(tail -1 "$file")
+    log_file="$LOG_DIR/$id.log"
 
-# Generate the model report file
+    echo "$path --> Failed"
+    echo "  URL: $url"
+
+    if [ -f "$log_file" ]; then
+      echo "  Error details:"
+      grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$log_file" | head -3 | sed 's/^/    /'
+      echo ""
+    fi
+  done
+
+  echo "WARNING: $FAILURE_COUNT downloads failed. See details above."
+else
+  echo ""
+  echo "✓ All downloads completed successfully!"
+fi
+
+# Generate model report
+REPORT_FILE="$COMFYUI_DIR/model-report.txt"
+echo "ComfyUI Model Installation Report" >"$REPORT_FILE"
+echo "Generated on: $(date)" >>"$REPORT_FILE"
+echo "----------------------------------------" >>"$REPORT_FILE"
+echo "" >>"$REPORT_FILE"
 
 # Add the IPAdapter special case models to the report
-echo "SPECIAL MODELS (IP-ADAPTER)" >> "$REPORT_FILE"
-echo "------------------------" >> "$REPORT_FILE"
+echo "SPECIAL MODELS (IP-ADAPTER)" >>"$REPORT_FILE"
+echo "------------------------" >>"$REPORT_FILE"
 for pair in "${ipa_special_models[@]}"; do
   dest=$(echo "$pair" | cut -d'|' -f2)
   filename=$(basename "$dest")
   dir=$(dirname "$dest")
-  
+
   if [ -f "$COMFYUI_DIR/$dest" ]; then
     filesize=$(du -h "$COMFYUI_DIR/$dest" | cut -f1)
-    echo "✓ $filename ($filesize)" >> "$REPORT_FILE"
+    echo "✓ $filename ($filesize)" >>"$REPORT_FILE"
   else
     url=$(echo "$pair" | cut -d'|' -f1)
-    echo "✗ $filename - FAILED" >> "$REPORT_FILE"
-    echo "  URL: $url" >> "$REPORT_FILE"
+    echo "✗ $filename - FAILED" >>"$REPORT_FILE"
+    echo "  URL: $url" >>"$REPORT_FILE"
   fi
 done
-echo "" >> "$REPORT_FILE"
+echo "" >>"$REPORT_FILE"
+
+# Create directory-based collections for the report
+declare -A MODELS_BY_DIR
+declare -A FAILED_BY_DIR
+
+# Collect successful downloads by directory
+for file in "$SUCCESS_DIR"/*; do
+  if [ -f "$file" ]; then
+    content=$(cat "$file")
+    # Extract directory and filename
+    if [[ "$content" =~ ([^/]+/[^/]+)/([^/]+)$ ]]; then
+      dir="${BASH_REMATCH[1]}"
+      filename="${BASH_REMATCH[2]}"
+
+      # Add to our directory-based collection
+      if [[ -z "${MODELS_BY_DIR[$dir]}" ]]; then
+        MODELS_BY_DIR[$dir]="$filename"
+      else
+        MODELS_BY_DIR[$dir]="${MODELS_BY_DIR[$dir]}"$'\n'"$filename"
+      fi
+    fi
+  fi
+done
+
+# Collect failed downloads by directory and section
+declare -A SECTION_FAILURES
+
+for file in "$FAIL_DIR"/*; do
+  if [ -f "$file" ]; then
+    id=$(basename "$file")
+    path=$(head -1 "$file")
+    url=$(tail -1 "$file")
+
+    # Get section if available
+    section="Uncategorized Models"
+    if [ -f "$SECTION_DIR/$id" ]; then
+      section=$(cat "$SECTION_DIR/$id")
+    fi
+
+    # Extract directory and filename
+    if [[ "$path" =~ ([^/]+/[^/]+)/([^/]+)$ ]]; then
+      dir="${BASH_REMATCH[1]}"
+      filename="${BASH_REMATCH[2]}"
+
+      # Get error message
+      error_msg=""
+      log_file="$LOG_DIR/$id.log"
+      if [ -f "$log_file" ]; then
+        error_msg=$(grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$log_file" | head -3)
+        if [ -z "$error_msg" ]; then
+          error_msg=$(tail -3 "$log_file")
+        fi
+      fi
+
+      # Create an entry with all the information
+      entry="$dir|$filename|$url|$error_msg"
+
+      # Add to our section-based collection
+      if [[ -z "${SECTION_FAILURES[$section]}" ]]; then
+        SECTION_FAILURES[$section]="$entry"
+      else
+        SECTION_FAILURES[$section]="${SECTION_FAILURES[$section]}"$'\n'"$entry"
+      fi
+    fi
+  fi
+done
 
 # Add successfully installed models organized by directory
-echo "SUCCESSFULLY INSTALLED MODELS" >> "$REPORT_FILE"
-echo "---------------------------" >> "$REPORT_FILE"
+echo "SUCCESSFULLY INSTALLED MODELS" >>"$REPORT_FILE"
+echo "---------------------------" >>"$REPORT_FILE"
 for dir in "${!MODELS_BY_DIR[@]}"; do
-  echo "Directory: $dir" >> "$REPORT_FILE"
-  echo "-----------------" >> "$REPORT_FILE"
-  
+  echo "Directory: $dir" >>"$REPORT_FILE"
+  echo "-----------------" >>"$REPORT_FILE"
+
   # List each file with its size
   echo "${MODELS_BY_DIR[$dir]}" | while read -r file; do
     if [ ! -z "$file" ]; then
       # Get file size if the file exists
       if [ -f "$COMFYUI_DIR/$dir/$file" ]; then
         filesize=$(du -h "$COMFYUI_DIR/$dir/$file" | cut -f1)
-        echo "✓ $file ($filesize)" >> "$REPORT_FILE"
+        echo "✓ $file ($filesize)" >>"$REPORT_FILE"
       else
-        echo "✓ $file (size unknown)" >> "$REPORT_FILE"
+        echo "✓ $file (size unknown)" >>"$REPORT_FILE"
       fi
     fi
   done
-  echo "" >> "$REPORT_FILE"
+  echo "" >>"$REPORT_FILE"
 done
 
-# Add failed downloads organized by directory with error messages
+# Add failed downloads organized by section with error messages
 if [ "$FAILURE_COUNT" -gt 0 ]; then
-  echo "FAILED DOWNLOADS (WITH ERROR DETAILS)" >> "$REPORT_FILE"
-  echo "---------------------------------" >> "$REPORT_FILE"
-  
-  # Create a structure to organize by section
-  declare -A SECTION_FAILURES
-  
-  # First, categorize failures by section
-  for fail_file in "$TEMP_LOG_DIR"/*.fail; do
-    log_id=$(basename "$fail_file" .fail)
-    section_file="$TEMP_LOG_DIR/$log_id.section"
-    
-    # Get the section if available
-    section="Uncategorized Models"
-    if [ -f "$section_file" ]; then
-      section=$(cat "$section_file")
-    fi
-    
-    # First line contains the file path
-    file_path=$(head -1 "$fail_file")
-    # Second line contains the URL
-    url=$(tail -1 "$fail_file")
-    
-    # Extract directory and filename
-    if [[ "$file_path" =~ ([^/]+/[^/]+)/([^[:space:]]+)\ --> ]]; then
-      dir="${BASH_REMATCH[1]}"
-      file="${BASH_REMATCH[2]}"
-      
-      # Get error message
-      error_log="$TEMP_LOG_DIR/$log_id.log"
-      error_msg=""
-      
-      if [ -f "$error_log" ]; then
-        error_msg=$(grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$error_log" | head -3)
-        if [ -z "$error_msg" ]; then
-          error_msg=$(tail -3 "$error_log")
-        fi
+  echo "FAILED DOWNLOADS (WITH ERROR DETAILS)" >>"$REPORT_FILE"
+  echo "---------------------------------" >>"$REPORT_FILE"
+
+  # Now output by section
+  for section in "${!SECTION_FAILURES[@]}"; do
+    echo "$section" >>"$REPORT_FILE"
+    echo "${section//?/-}" >>"$REPORT_FILE"
+    echo "" >>"$REPORT_FILE"
+
+    # Keep track of directories in this section
+    declare -A SECTION_DIRS
+
+    # First pass to identify directories
+    echo "${SECTION_FAILURES[$section]}" | while read -r entry; do
+      if [ ! -z "$entry" ]; then
+        dir=$(echo "$entry" | cut -d'|' -f1)
+        SECTION_DIRS["$dir"]=1
       fi
-      
-      # Create an entry with all the information
-      entry="$dir|$file|$url|$error_msg"
-      
-      # Add to our section-based collection
-      if [[ -z "${SECTION_FAILURES[$section]}" ]]; then
-        SECTION_FAILURES[$section]="$entry"
-      else
-        SECTION_FAILURES[$section]="${SECTION_FAILURES[$section]}"
+    done
+
+    # Second pass to output by directory
+    for dir in "${!SECTION_DIRS[@]}"; do
+      echo "Directory: $dir" >>"$REPORT_FILE"
+      echo "-----------------" >>"$REPORT_FILE"
+
+      # Process entries for this directory
+      echo "${SECTION_FAILURES[$section]}" | while read -r entry; do
+        if [ ! -z "$entry" ]; then
+          entry_dir=$(echo "$entry" | cut -d'|' -f1)
+
+          if [ "$entry_dir" = "$dir" ]; then
+            file=$(echo "$entry" | cut -d'|' -f2)
+            url=$(echo "$entry" | cut -d'|' -f3)
+            error_msg=$(echo "$entry" | cut -d'|' -f4-)
+
+            echo "✗ $file" >>"$REPORT_FILE"
+            echo "  URL: $url" >>"$REPORT_FILE"
+
+            if [ ! -z "$error_msg" ]; then
+              echo "  Error details:" >>"$REPORT_FILE"
+              echo "$error_msg" | sed 's/^/    /' >>"$REPORT_FILE"
+            else
+              echo "  Error details: No specific error message captured" >>"$REPORT_FILE"
+            fi
+            echo "" >>"$REPORT_FILE"
+          fi
+        fi
+      done
+      echo "" >>"$REPORT_FILE"
+    done
+  done
+fi
 
 # Add summary to the report
-echo "SUMMARY" >> "$REPORT_FILE"
-echo "-------" >> "$REPORT_FILE"
-echo "Total models attempted: $TOTAL_DOWNLOADS" >> "$REPORT_FILE"
-echo "Successfully downloaded: $SUCCESS_COUNT" >> "$REPORT_FILE"
-echo "Failed downloads: $FAILURE_COUNT" >> "$REPORT_FILE"
-echo "" >> "$REPORT_FILE"
-echo "Report generated by ComfyUI Enhanced Model Downloader" >> "$REPORT_FILE"
+echo "SUMMARY" >>"$REPORT_FILE"
+echo "-------" >>"$REPORT_FILE"
+echo "Total models attempted: $TOTAL_DOWNLOADS" >>"$REPORT_FILE"
+echo "Successfully downloaded: $SUCCESS_COUNT" >>"$REPORT_FILE"
+echo "Failed downloads: $FAILURE_COUNT" >>"$REPORT_FILE"
+echo "" >>"$REPORT_FILE"
+echo "Report generated by ComfyUI Enhanced Model Downloader" >>"$REPORT_FILE"
 
-# Clean up
-rm -rf "$TEMP_LOG_DIR"
-rm "$DOWNLOAD_COMMANDS_FILE"
-
-echo ""
-echo "Summary: $SUCCESS_COUNT successful, $FAILURE_COUNT failed out of $TOTAL_DOWNLOADS total"
-echo "A detailed model report has been generated at: $REPORT_FILE"
-
-# Generate a proposed model_downloads.txt for retrying just the failed downloads
+# Generate a failed_downloads.txt for retrying just the failed downloads
 if [ "$FAILURE_COUNT" -gt 0 ]; then
-  show_progress "Creating retry download file for failed models"
-  
   RETRY_FILE="$COMFYUI_DIR/failed_downloads.txt"
-  echo "# Failed Downloads - Retry File" > "$RETRY_FILE"
-  echo "# Generated on: $(date)" >> "$RETRY_FILE"
-  echo "# Run with: ./install-models.sh --failed" >> "$RETRY_FILE"
-  echo "" >> "$RETRY_FILE"
-  
-  # Track the current section
+  echo "# Failed Downloads - Retry File" >"$RETRY_FILE"
+  echo "# Generated on: $(date)" >>"$RETRY_FILE"
+  echo "# Run with: ./install-models.sh --failed" >>"$RETRY_FILE"
+  echo "" >>"$RETRY_FILE"
+
+  # Track the current section for output
   current_section=""
-  
+
   # Read the original download list
   while read -r line; do
     # Handle section comments
     if [[ "$line" == \#* ]]; then
       current_section="$line"
-      
       # Don't output section headers until we know we have content for that section
       continue
     fi
-    
+
     # Skip empty lines
     if [[ -z "$line" ]]; then
       continue
     fi
-    
+
     # Split the line by pipe character to get URL and destination
     url=$(echo "$line" | cut -d'|' -f1)
     dest=$(echo "$line" | cut -d'|' -f2)
-    
+
     # Get filename for checking
     filename=$(basename "$url" | cut -d'?' -f1)
     full_path="$COMFYUI_DIR/$dest/$filename"
-    
+
     # If file doesn't exist, add it to the retry file
     if [ ! -f "$full_path" ]; then
       # If we haven't output this section header yet, do it now
       if [ ! -z "$current_section" ]; then
-        echo "$current_section" >> "$RETRY_FILE"
-        current_section=""  # Reset so we don't output it again
+        echo "$current_section" >>"$RETRY_FILE"
+        current_section="" # Reset so we don't output it again
       fi
-      
-      echo "$line" >> "$RETRY_FILE"
+
+      echo "$line" >>"$RETRY_FILE"
     fi
-  done < "$DOWNLOAD_LIST"
-  
+  done <"$DOWNLOAD_LIST"
+
   echo "Created retry file: $RETRY_FILE"
-  echo "You can retry failed downloads with: ./install-models.sh --failed"
 fi
 
-# Also create a installed_model_downloads.txt with only the successful models
-show_progress "Creating installed_model_downloads.txt for successfully downloaded models"
-
-PROPOSED_FILE="$COMFYUI_DIR/installed_model_downloads.txt"
-echo "# Successfully Downloaded Models" > "$PROPOSED_FILE"
-echo "# Generated on: $(date)" >> "$PROPOSED_FILE"
-echo "# This file contains only models that were successfully downloaded" >> "$PROPOSED_FILE"
-echo "" >> "$PROPOSED_FILE"
+# Create installed_model_downloads.txt with only the successful models
+INSTALLED_FILE="$COMFYUI_DIR/installed_model_downloads.txt"
+echo "# Successfully Downloaded Models" >"$INSTALLED_FILE"
+echo "# Generated on: $(date)" >>"$INSTALLED_FILE"
+echo "# This file contains only models that were successfully downloaded" >>"$INSTALLED_FILE"
+echo "" >>"$INSTALLED_FILE"
 
 # Track the current section
 current_section=""
@@ -511,166 +542,57 @@ while read -r line; do
   if [[ "$line" == \#* ]]; then
     # If the previous section had content, add a blank line
     if [ "$section_has_content" = true ]; then
-      echo "" >> "$PROPOSED_FILE"
+      echo "" >>"$INSTALLED_FILE"
     fi
-    
+
     current_section="$line"
     section_has_content=false
-    
+
     # Write the section header
-    echo "$current_section" >> "$PROPOSED_FILE"
+    echo "$current_section" >>"$INSTALLED_FILE"
     continue
   fi
-  
+
   # Skip empty lines
   if [[ -z "$line" ]]; then
     continue
   fi
-  
+
   # Split the line by pipe character to get URL and destination
   url=$(echo "$line" | cut -d'|' -f1)
   dest=$(echo "$line" | cut -d'|' -f2)
-  
+
   # Get filename for checking
   filename=$(basename "$url" | cut -d'?' -f1)
   full_path="$COMFYUI_DIR/$dest/$filename"
-  
+
   # Check for special IPAdapter models which have different filenames
   found_special=false
   for pair in "${ipa_special_models[@]}"; do
     special_url=$(echo "$pair" | cut -d'|' -f1)
     special_dest=$(echo "$pair" | cut -d'|' -f2)
-    
+
     if [ "$special_url" = "$url" ]; then
       if [ -f "$COMFYUI_DIR/$special_dest" ]; then
-        echo "$line" >> "$PROPOSED_FILE"
+        echo "$line" >>"$INSTALLED_FILE"
         section_has_content=true
         found_special=true
         break
       fi
     fi
   done
-  
+
   # If it's not a special model and the file exists, add it
   if [ "$found_special" = false ] && [ -f "$full_path" ]; then
-    echo "$line" >> "$PROPOSED_FILE"
+    echo "$line" >>"$INSTALLED_FILE"
     section_has_content=true
   fi
-done < "$DOWNLOAD_LIST"
+done <"$DOWNLOAD_LIST"
 
-echo "Created installed model downloads file: $PROPOSED_FILE"
-\n'"$file|$url"
-      fi
-    fi
-  done
-  
-  if [ "$FAILURE_COUNT" -gt 0 ]; then
-    echo ""
-    echo "✗ Failed Downloads: $FAILURE_COUNT"
-    echo "--------------------"
-    
-    # Process each failure log
-    for fail_file in "$TEMP_LOG_DIR"/*.fail; do
-      log_id=$(basename "$fail_file" .fail)
-      error_log="$TEMP_LOG_DIR/$log_id.log"
-      
-      # Print the failure info
-      cat "$fail_file"
-      
-      # Print the wget error if available
-      if [ -f "$error_log" ]; then
-        echo "  Error details:"
-        grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$error_log" | head -3 | sed 's/^/    /'
-        echo ""
-      fi
-    done
-    
-    echo ""
-    echo "WARNING: $FAILURE_COUNT downloads failed. See details above."
-    echo "A detailed report with error messages is being generated in model-report.txt"
-    echo "You can run the script again to retry the failed downloads."
-  fi
-else
-  echo ""
-  echo "✓ All downloads completed successfully!"
-fi
-
-# Generate the model report file
-
-# Add the IPAdapter special case models to the report
-echo "SPECIAL MODELS (IP-ADAPTER)" >> "$REPORT_FILE"
-echo "------------------------" >> "$REPORT_FILE"
-for pair in "${ipa_special_models[@]}"; do
-  dest=$(echo "$pair" | cut -d'|' -f2)
-  filename=$(basename "$dest")
-  dir=$(dirname "$dest")
-  
-  if [ -f "$COMFYUI_DIR/$dest" ]; then
-    filesize=$(du -h "$COMFYUI_DIR/$dest" | cut -f1)
-    echo "✓ $filename ($filesize)" >> "$REPORT_FILE"
-  else
-    url=$(echo "$pair" | cut -d'|' -f1)
-    echo "✗ $filename - FAILED" >> "$REPORT_FILE"
-    echo "  URL: $url" >> "$REPORT_FILE"
-  fi
-done
-echo "" >> "$REPORT_FILE"
-
-# Add successfully installed models organized by directory
-echo "SUCCESSFULLY INSTALLED MODELS" >> "$REPORT_FILE"
-echo "---------------------------" >> "$REPORT_FILE"
-for dir in "${!MODELS_BY_DIR[@]}"; do
-  echo "Directory: $dir" >> "$REPORT_FILE"
-  echo "-----------------" >> "$REPORT_FILE"
-  
-  # List each file with its size
-  echo "${MODELS_BY_DIR[$dir]}" | while read -r file; do
-    if [ ! -z "$file" ]; then
-      # Get file size if the file exists
-      if [ -f "$COMFYUI_DIR/$dir/$file" ]; then
-        filesize=$(du -h "$COMFYUI_DIR/$dir/$file" | cut -f1)
-        echo "✓ $file ($filesize)" >> "$REPORT_FILE"
-      else
-        echo "✓ $file (size unknown)" >> "$REPORT_FILE"
-      fi
-    fi
-  done
-  echo "" >> "$REPORT_FILE"
-done
-
-# Add failed downloads organized by directory
-if [ "$FAILURE_COUNT" -gt 0 ]; then
-  echo "FAILED DOWNLOADS" >> "$REPORT_FILE"
-  echo "---------------" >> "$REPORT_FILE"
-  for dir in "${!FAILED_BY_DIR[@]}"; do
-    echo "Directory: $dir" >> "$REPORT_FILE"
-    echo "-----------------" >> "$REPORT_FILE"
-    
-    # List each failed file with its URL
-    echo "${FAILED_BY_DIR[$dir]}" | while read -r entry; do
-      if [ ! -z "$entry" ]; then
-        file=$(echo "$entry" | cut -d'|' -f1)
-        url=$(echo "$entry" | cut -d'|' -f2)
-        echo "✗ $file" >> "$REPORT_FILE"
-        echo "  URL: $url" >> "$REPORT_FILE"
-      fi
-    done
-    echo "" >> "$REPORT_FILE"
-  done
-fi
-
-# Add summary to the report
-echo "SUMMARY" >> "$REPORT_FILE"
-echo "-------" >> "$REPORT_FILE"
-echo "Total models attempted: $TOTAL_DOWNLOADS" >> "$REPORT_FILE"
-echo "Successfully downloaded: $SUCCESS_COUNT" >> "$REPORT_FILE"
-echo "Failed downloads: $FAILURE_COUNT" >> "$REPORT_FILE"
-echo "" >> "$REPORT_FILE"
-echo "Report generated by ComfyUI Enhanced Model Downloader" >> "$REPORT_FILE"
+echo "Created installed model downloads file: $INSTALLED_FILE"
 
 # Clean up
-rm -rf "$TEMP_LOG_DIR"
-rm "$DOWNLOAD_COMMANDS_FILE"
+rm -rf "$TEMP_DIR"
 
 echo ""
 echo "Summary: $SUCCESS_COUNT successful, $FAILURE_COUNT failed out of $TOTAL_DOWNLOADS total"
@@ -685,214 +607,13 @@ if [ "$FAILURE_COUNT" -gt 0 ]; then
   echo "Some downloads failed. The following files have been created to help you:"
   echo "1. $REPORT_FILE - Detailed model installation report with error messages"
   echo "2. $RETRY_FILE - Contains only the failed downloads for easy retry"
-  echo "3. $PROPOSED_FILE - Contains only the successfully downloaded models"
+  echo "3. $INSTALLED_FILE - Contains only the successfully downloaded models"
   echo ""
   echo "To retry failed downloads, run: ./install-models.sh --failed"
 else
   echo "All downloads completed successfully!"
   echo "A detailed model report has been generated at: $REPORT_FILE"
-  echo "A list of all installed models has been created at: $PROPOSED_FILE"
+  echo "A list of all installed models has been created at: $INSTALLED_FILE"
 fi
 
 echo "You can now start using ComfyUI with all the downloaded models."
-\n'"$entry"
-      fi
-    fi
-  done
-  
-  # Now output by section
-  for section in "${!SECTION_FAILURES[@]}"; do
-    echo "$section" >> "$REPORT_FILE"
-    echo "${section//?/-}" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    
-    # Keep track of directories in this section
-    declare -A SECTION_DIRS
-    
-    # First pass to identify directories
-    echo "${SECTION_FAILURES[$section]}" | while read -r entry; do
-      if [ ! -z "$entry" ]; then
-        dir=$(echo "$entry" | cut -d'|' -f1)
-        SECTION_DIRS["$dir"]=1
-      fi
-    done
-    
-    # Second pass to output by directory
-    for dir in "${!SECTION_DIRS[@]}"; do
-      echo "Directory: $dir" >> "$REPORT_FILE"
-      echo "-----------------" >> "$REPORT_FILE"
-      
-      # Process entries for this directory
-      echo "${SECTION_FAILURES[$section]}" | while read -r entry; do
-        if [ ! -z "$entry" ]; then
-          entry_dir=$(echo "$entry" | cut -d'|' -f1)
-          
-          if [ "$entry_dir" = "$dir" ]; then
-            file=$(echo "$entry" | cut -d'|' -f2)
-            url=$(echo "$entry" | cut -d'|' -f3)
-            error_msg=$(echo "$entry" | cut -d'|' -f4-)
-            
-            echo "✗ $file" >> "$REPORT_FILE"
-            echo "  URL: $url" >> "$REPORT_FILE"
-            
-            if [ ! -z "$error_msg" ]; then
-              echo "  Error details:" >> "$REPORT_FILE"
-              echo "$error_msg" | sed 's/^/    /' >> "$REPORT_FILE"
-            else
-              echo "  Error details: No specific error message captured" >> "$REPORT_FILE"
-            fi
-            echo "" >> "$REPORT_FILE"
-          fi
-        fi
-      done
-      echo "" >> "$REPORT_FILE"
-    done
-  done
-fi
-
-# Add summary to the report
-echo "SUMMARY" >> "$REPORT_FILE"
-echo "-------" >> "$REPORT_FILE"
-echo "Total models attempted: $TOTAL_DOWNLOADS" >> "$REPORT_FILE"
-echo "Successfully downloaded: $SUCCESS_COUNT" >> "$REPORT_FILE"
-echo "Failed downloads: $FAILURE_COUNT" >> "$REPORT_FILE"
-echo "" >> "$REPORT_FILE"
-echo "Report generated by ComfyUI Enhanced Model Downloader" >> "$REPORT_FILE"
-
-# Clean up
-rm -rf "$TEMP_LOG_DIR"
-rm "$DOWNLOAD_COMMANDS_FILE"
-
-echo ""
-echo "Summary: $SUCCESS_COUNT successful, $FAILURE_COUNT failed out of $TOTAL_DOWNLOADS total"
-echo "A detailed model report has been generated at: $REPORT_FILE"
-
-show_progress "Download Complete!"
-echo "All available models have been downloaded to $COMFYUI_DIR/models/"
-echo "IPAdapter models have been properly renamed for the Unified Loader."
-echo ""
-echo "You can now start using ComfyUI with all the downloaded models."
-echo "If you had failed downloads, you can run this script again to retry."
-\n'"$file|$url"
-      fi
-    fi
-  done
-  
-  if [ "$FAILURE_COUNT" -gt 0 ]; then
-    echo ""
-    echo "✗ Failed Downloads: $FAILURE_COUNT"
-    echo "--------------------"
-    
-    # Process each failure log
-    for fail_file in "$TEMP_LOG_DIR"/*.fail; do
-      log_id=$(basename "$fail_file" .fail)
-      error_log="$TEMP_LOG_DIR/$log_id.log"
-      
-      # Print the failure info
-      cat "$fail_file"
-      
-      # Print the wget error if available
-      if [ -f "$error_log" ]; then
-        echo "  Error details:"
-        grep -i "error\|failed\|permission denied\|not found\|forbidden\|refused\|timeout\|no route" "$error_log" | head -3 | sed 's/^/    /'
-        echo ""
-      fi
-    done
-    
-    echo ""
-    echo "WARNING: $FAILURE_COUNT downloads failed. See details above."
-    echo "A detailed report with error messages is being generated in model-report.txt"
-    echo "You can run the script again to retry the failed downloads."
-  fi
-else
-  echo ""
-  echo "✓ All downloads completed successfully!"
-fi
-
-# Generate the model report file
-
-# Add the IPAdapter special case models to the report
-echo "SPECIAL MODELS (IP-ADAPTER)" >> "$REPORT_FILE"
-echo "------------------------" >> "$REPORT_FILE"
-for pair in "${ipa_special_models[@]}"; do
-  dest=$(echo "$pair" | cut -d'|' -f2)
-  filename=$(basename "$dest")
-  dir=$(dirname "$dest")
-  
-  if [ -f "$COMFYUI_DIR/$dest" ]; then
-    filesize=$(du -h "$COMFYUI_DIR/$dest" | cut -f1)
-    echo "✓ $filename ($filesize)" >> "$REPORT_FILE"
-  else
-    url=$(echo "$pair" | cut -d'|' -f1)
-    echo "✗ $filename - FAILED" >> "$REPORT_FILE"
-    echo "  URL: $url" >> "$REPORT_FILE"
-  fi
-done
-echo "" >> "$REPORT_FILE"
-
-# Add successfully installed models organized by directory
-echo "SUCCESSFULLY INSTALLED MODELS" >> "$REPORT_FILE"
-echo "---------------------------" >> "$REPORT_FILE"
-for dir in "${!MODELS_BY_DIR[@]}"; do
-  echo "Directory: $dir" >> "$REPORT_FILE"
-  echo "-----------------" >> "$REPORT_FILE"
-  
-  # List each file with its size
-  echo "${MODELS_BY_DIR[$dir]}" | while read -r file; do
-    if [ ! -z "$file" ]; then
-      # Get file size if the file exists
-      if [ -f "$COMFYUI_DIR/$dir/$file" ]; then
-        filesize=$(du -h "$COMFYUI_DIR/$dir/$file" | cut -f1)
-        echo "✓ $file ($filesize)" >> "$REPORT_FILE"
-      else
-        echo "✓ $file (size unknown)" >> "$REPORT_FILE"
-      fi
-    fi
-  done
-  echo "" >> "$REPORT_FILE"
-done
-
-# Add failed downloads organized by directory
-if [ "$FAILURE_COUNT" -gt 0 ]; then
-  echo "FAILED DOWNLOADS" >> "$REPORT_FILE"
-  echo "---------------" >> "$REPORT_FILE"
-  for dir in "${!FAILED_BY_DIR[@]}"; do
-    echo "Directory: $dir" >> "$REPORT_FILE"
-    echo "-----------------" >> "$REPORT_FILE"
-    
-    # List each failed file with its URL
-    echo "${FAILED_BY_DIR[$dir]}" | while read -r entry; do
-      if [ ! -z "$entry" ]; then
-        file=$(echo "$entry" | cut -d'|' -f1)
-        url=$(echo "$entry" | cut -d'|' -f2)
-        echo "✗ $file" >> "$REPORT_FILE"
-        echo "  URL: $url" >> "$REPORT_FILE"
-      fi
-    done
-    echo "" >> "$REPORT_FILE"
-  done
-fi
-
-# Add summary to the report
-echo "SUMMARY" >> "$REPORT_FILE"
-echo "-------" >> "$REPORT_FILE"
-echo "Total models attempted: $TOTAL_DOWNLOADS" >> "$REPORT_FILE"
-echo "Successfully downloaded: $SUCCESS_COUNT" >> "$REPORT_FILE"
-echo "Failed downloads: $FAILURE_COUNT" >> "$REPORT_FILE"
-echo "" >> "$REPORT_FILE"
-echo "Report generated by ComfyUI Enhanced Model Downloader" >> "$REPORT_FILE"
-
-# Clean up
-rm -rf "$TEMP_LOG_DIR"
-rm "$DOWNLOAD_COMMANDS_FILE"
-
-echo ""
-echo "Summary: $SUCCESS_COUNT successful, $FAILURE_COUNT failed out of $TOTAL_DOWNLOADS total"
-echo "A detailed model report has been generated at: $REPORT_FILE"
-
-show_progress "Download Complete!"
-echo "All available models have been downloaded to $COMFYUI_DIR/models/"
-echo "IPAdapter models have been properly renamed for the Unified Loader."
-echo ""
-echo "You can now start using ComfyUI with all the downloaded models."
-echo "If you had failed downloads, you can run this script again to retry."
