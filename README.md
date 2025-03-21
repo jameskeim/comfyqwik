@@ -163,10 +163,11 @@ For the truly work-efficient (aka lazy) cloud user:
 
 ## Requirements
 
-- Bash shell
+- Bash shell (Linux or macOS, or WSL on Windows)
 - Git
 - Python 3.8+
 - wget
+- NVIDIA GPU with CUDA support (for optimal performance)
 - A desire to save time and money
 
 ## Quality of Life Improvements
@@ -219,7 +220,7 @@ If you encounter issues not covered here, please fork the repository and make yo
 
 ## License
 
-This project is released under the MIT License. See the LICENSE file for details.
+These scripts are provided "as is" without any warranty. Use at your own risk.
 
 ## Acknowledgments
 
