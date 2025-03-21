@@ -7,8 +7,23 @@ echo "=== ComfyUI Model Downloader ==="
 # Get the directory where the script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Default ComfyUI directory is current directory, but can be specified as argument
-COMFYUI_DIR=${1:-$(pwd)}
+# Default values
+TEST_MODE=false
+COMFYUI_DIR=""
+
+# Parse command-line arguments
+for arg in "$@"; do
+  if [ "$arg" = "--test" ]; then
+    TEST_MODE=true
+  elif [ "$arg" != "--test" ]; then
+    COMFYUI_DIR="$arg"
+  fi
+done
+
+# If no directory was specified, use current directory
+if [ -z "$COMFYUI_DIR" ]; then
+  COMFYUI_DIR=$(pwd)
+fi
 
 # Determine optimal number of parallel downloads based on CPU cores
 # Use 75% of available cores by default, minimum 4, maximum 32
@@ -33,11 +48,17 @@ show_progress() {
   echo "---------------------------------------------------"
 }
 
-# Check if the specified directory is a ComfyUI directory
-if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
-  echo "ERROR: The specified directory does not appear to be a ComfyUI installation."
-  echo "Please specify a valid ComfyUI directory as an argument."
-  exit 1
+# Check if the specified directory is a ComfyUI directory (unless in test mode)
+if [ "$TEST_MODE" = false ]; then
+  if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
+    echo "ERROR: The specified directory does not appear to be a ComfyUI installation."
+    echo "Please specify a valid ComfyUI directory as an argument."
+    echo "To bypass this check for testing, use the --test flag."
+    exit 1
+  fi
+else
+  echo "Running in TEST MODE - ComfyUI directory check bypassed"
+  echo "Using directory: $COMFYUI_DIR"
 fi
 
 show_progress "Creating model directories"
@@ -51,15 +72,50 @@ mkdir -p "$COMFYUI_DIR/models/upscale_models"
 mkdir -p "$COMFYUI_DIR/models/facerestore_models"
 mkdir -p "$COMFYUI_DIR/models/ipadapter"
 mkdir -p "$COMFYUI_DIR/models/instantid/antelopev2"
-mkdir -p "$COMFYUI_DIR/models/insightface"
-mkdir -p "$COMFYUI_DIR/models/ultralytics/bbox"
-mkdir -p "$COMFYUI_DIR/models/sams"
-mkdir -p "$COMFYUI_DIR/models/reactor/faces"
-mkdir -p "$COMFYUI_DIR/models/reswapper"
 
-show_progress "Starting model downloads"
-echo "Using $MAX_PARALLEL_DOWNLOADS parallel downloads (based on $AVAILABLE_CORES CPU cores)"
 cd "$COMFYUI_DIR"
+
+# ====================================================
+# IPAdapter Special Case Handling - Processed Sequentially
+# ====================================================
+show_progress "Downloading IPAdapter models that require special naming"
+
+# Array of source URLs and destination filenames
+declare -a ipa_special_models=(
+  "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+  "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/image_encoder/pytorch_model.bin|models/clip_vision/clip-vit-large-patch14-336.bin"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin|models/ipadapter/Kolors-IP-Adapter-Plus.bin"
+  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin|models/ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin"
+)
+
+# Process each URL and destination pair - doing these sequentially for better visibility
+echo "Processing ${#ipa_special_models[@]} special case IPAdapter models sequentially..."
+
+for pair in "${ipa_special_models[@]}"; do
+  url=$(echo "$pair" | cut -d'|' -f1)
+  dest=$(echo "$pair" | cut -d'|' -f2)
+
+  # Get filename for better logging
+  filename=$(basename "$dest")
+  full_path="$COMFYUI_DIR/$dest"
+
+  echo "Downloading to $dest ..."
+  if wget -q -c "$url" -O "$full_path" 2>/dev/null; then
+    echo "$dest <-- Complete"
+  else
+    echo "$dest <-- Failed"
+    echo "$url"
+  fi
+done
+
+echo "All IPAdapter special case models have been processed."
+
+# ====================================================
+# Main Model Downloads - With Clean Success/Failure Reporting
+# ====================================================
+show_progress "Starting main model downloads"
+echo "Using $MAX_PARALLEL_DOWNLOADS parallel downloads (based on $AVAILABLE_CORES CPU cores)"
 
 # Check if download list exists
 DOWNLOAD_LIST="$SCRIPT_DIR/model_downloads.txt"
@@ -71,6 +127,8 @@ fi
 
 # Create a temporary file to hold download commands
 DOWNLOAD_COMMANDS_FILE=$(mktemp)
+# Create a temporary directory to store success/failure logs
+TEMP_LOG_DIR=$(mktemp -d)
 
 # Read the download list and create wget commands
 while read -r line; do
@@ -88,217 +146,55 @@ while read -r line; do
   url=$(echo "$line" | cut -d'|' -f1)
   dest=$(echo "$line" | cut -d'|' -f2)
 
-  # Get filename for progress tracking
+  # Get filename for tracking
   filename=$(basename "$url" | cut -d'?' -f1)
 
-  # Add the download command to our commands file
-  echo "cd \"$COMFYUI_DIR\" && wget -q -c \"$url\" -P \"./$(echo $dest)\" --show-progress && echo \"Downloaded: \$filename\"" >>"$DOWNLOAD_COMMANDS_FILE"
+  # Create a unique log identifier
+  log_id=$(echo "$url" | md5sum | cut -d' ' -f1)
+
+  # Add the download command to our commands file with success/failure reporting
+  echo "cd \"$COMFYUI_DIR\" && wget -q -c \"$url\" -P \"./$(echo $dest)\" > /dev/null 2>&1 && echo \"$dest/$filename <-- Complete\" > \"$TEMP_LOG_DIR/$log_id.success\" || { echo \"$dest/$filename <-- Failed\" > \"$TEMP_LOG_DIR/$log_id.fail\"; echo \"$url\" >> \"$TEMP_LOG_DIR/$log_id.fail\"; }" >>"$DOWNLOAD_COMMANDS_FILE"
 done <"$DOWNLOAD_LIST"
 
 # Count total downloads
 TOTAL_DOWNLOADS=$(wc -l <"$DOWNLOAD_COMMANDS_FILE")
 echo "Starting $TOTAL_DOWNLOADS downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
+echo "Download results will be reported when complete."
 
 # Execute downloads with xargs for better parallelism
 cat "$DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}"
 
+# Process and display results
+echo ""
+echo "Download Results:"
+echo "-----------------"
+
+# Print successful downloads
+if ls "$TEMP_LOG_DIR"/*.success 1>/dev/null 2>&1; then
+  cat "$TEMP_LOG_DIR"/*.success | sort
+fi
+
+# Print failed downloads
+if ls "$TEMP_LOG_DIR"/*.fail 1>/dev/null 2>&1; then
+  echo ""
+  echo "Failed Downloads:"
+  echo "-----------------"
+  cat "$TEMP_LOG_DIR"/*.fail
+  FAILURE_COUNT=$(ls -1 "$TEMP_LOG_DIR"/*.fail 2>/dev/null | wc -l)
+  echo ""
+  echo "WARNING: $FAILURE_COUNT downloads failed. See details above."
+else
+  echo ""
+  echo "✓ All downloads completed successfully!"
+fi
+
 # Clean up
+rm -rf "$TEMP_LOG_DIR"
 rm "$DOWNLOAD_COMMANDS_FILE"
-
-# ====================================================
-# IPAdapter Special Case Handling
-# ====================================================
-# This section handles models that require specific renaming for the IPAdapter's Unified Loader
-
-show_progress "Downloading IPAdapter models that require special naming"
-
-# Array of source URLs and destination filenames
-declare -a ipa_special_models=(
-  "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
-  "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors|models/clip_vision/CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
-  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/image_encoder/pytorch_model.bin|models/clip_vision/clip-vit-large-patch14-336.bin"
-  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin|models/ipadapter/Kolors-IP-Adapter-Plus.bin"
-  "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin|models/ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin"
-)
-
-# Create a temporary file for download commands
-IPA_DOWNLOAD_COMMANDS_FILE=$(mktemp)
-
-# Process each URL and destination pair
-for pair in "${ipa_special_models[@]}"; do
-  url=$(echo "$pair" | cut -d'|' -f1)
-  dest=$(echo "$pair" | cut -d'|' -f2)
-
-  # Get filename for better logging
-  filename=$(basename "$dest")
-
-  # Add the download command to our commands file
-  echo "cd \"$COMFYUI_DIR\" && wget -q -c \"$url\" -O \"./$(echo $dest)\" --show-progress && echo \"Downloaded and renamed: $filename\"" >>"$IPA_DOWNLOAD_COMMANDS_FILE"
-done
-
-# Count total special downloads
-TOTAL_IPA_DOWNLOADS=$(wc -l <"$IPA_DOWNLOAD_COMMANDS_FILE")
-echo "Starting $TOTAL_IPA_DOWNLOADS special downloads with $MAX_PARALLEL_DOWNLOADS parallel processes"
-
-# Execute downloads with xargs
-cat "$IPA_DOWNLOAD_COMMANDS_FILE" | xargs -P "$MAX_PARALLEL_DOWNLOADS" -I {} bash -c "{}"
-
-# Clean up
-rm "$IPA_DOWNLOAD_COMMANDS_FILE"
-
-# ====================================================
-# ReActor Models Installation
-# ====================================================
-show_progress "Installing ReActor models"
-
-# Create temporary directory for the repository
-TEMP_DIR="$COMFYUI_DIR/temp_reactor_repo"
-echo "Creating temporary directory at $TEMP_DIR"
-rm -rf "$TEMP_DIR" # Clean up any existing temp dir
-mkdir -p "$TEMP_DIR"
-
-# Check if git-lfs is installed
-if ! command -v git-lfs &>/dev/null; then
-  echo "ERROR: Git LFS is not installed. This is required for ReActor models."
-  echo "Please install Git LFS manually: https://git-lfs.github.com/"
-  echo "After installing, run: git lfs install"
-  echo "Skipping ReActor models installation..."
-else
-  echo "Git LFS is installed. Attempting to initialize..."
-  # Initialize Git LFS with verbose output
-  git lfs install --verbose
-  echo "Git LFS initialization completed with status: $?"
-
-  # Clone the repository with more verbose output
-  echo "Cloning ReActor models repository (this may take some time)..."
-  echo "Using repository: https://huggingface.co/datasets/Gourieff/ReActor"
-
-  # Try cloning with more detailed output
-  if git clone --verbose https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR" 2>&1; then
-    echo "Repository cloned successfully."
-
-    # Verify directory structure
-    echo "Checking repository structure..."
-    find "$TEMP_DIR" -type d -maxdepth 2 | sort
-
-    # Verify if models directory exists and what it contains
-    if [ -d "$TEMP_DIR/models" ]; then
-      echo "Models directory found. Contents:"
-      find "$TEMP_DIR/models" -type f -maxdepth 1 | sort
-
-      # Copy inswapper models to insightface directory
-      echo "Copying inswapper models..."
-      if [ -f "$TEMP_DIR/models/inswapper_128.onnx" ]; then
-        echo "Found inswapper_128.onnx, copying..."
-        cp -v "$TEMP_DIR/models/inswapper_128.onnx" "$COMFYUI_DIR/models/insightface/"
-      else
-        echo "ERROR: inswapper_128.onnx not found in $TEMP_DIR/models/"
-      fi
-
-      if [ -f "$TEMP_DIR/models/inswapper_128_fp16.onnx" ]; then
-        echo "Found inswapper_128_fp16.onnx, copying..."
-        cp -v "$TEMP_DIR/models/inswapper_128_fp16.onnx" "$COMFYUI_DIR/models/insightface/"
-      else
-        echo "ERROR: inswapper_128_fp16.onnx not found in $TEMP_DIR/models/"
-      fi
-
-      # Copy reswapper models with explicit checks
-      echo "Copying reswapper models..."
-      if [ -f "$TEMP_DIR/models/reswapper_128.onnx" ]; then
-        echo "Found reswapper_128.onnx, copying..."
-        cp -v "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/"
-      else
-        echo "WARNING: reswapper_128.onnx not found in $TEMP_DIR/models/"
-      fi
-
-      if [ -f "$TEMP_DIR/models/reswapper_256.onnx" ]; then
-        echo "Found reswapper_256.onnx, copying..."
-        cp -v "$TEMP_DIR/models/reswapper_256.onnx" "$COMFYUI_DIR/models/reswapper/"
-      else
-        echo "WARNING: reswapper_256.onnx not found in $TEMP_DIR/models/"
-      fi
-
-      # Check face restoration models directory
-      echo "Checking face restoration models..."
-      if [ -d "$TEMP_DIR/models/facerestore_models" ]; then
-        echo "Face restoration models directory found. Contents:"
-        find "$TEMP_DIR/models/facerestore_models" -type f | sort
-        echo "Copying face restoration models..."
-        cp -v "$TEMP_DIR/models/facerestore_models/"* "$COMFYUI_DIR/models/facerestore_models/" 2>/dev/null || echo "Warning: No files copied from facerestore_models"
-      else
-        echo "WARNING: facerestore_models directory not found in $TEMP_DIR/models/"
-      fi
-
-      # Check detection/bbox directory
-      echo "Checking face detection model..."
-      if [ -f "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" ]; then
-        echo "Found face_yolov8m.pt, copying..."
-        cp -v "$TEMP_DIR/models/detection/bbox/face_yolov8m.pt" "$COMFYUI_DIR/models/ultralytics/bbox/"
-      else
-        echo "WARNING: Directory structure for detection models is different than expected."
-        echo "Looking for detection models in alternate locations..."
-        find "$TEMP_DIR" -name "face_yolov8m.pt" | while read f; do
-          echo "Found at $f, copying..."
-          cp -v "$f" "$COMFYUI_DIR/models/ultralytics/bbox/"
-        done
-      fi
-
-      # Check SAMs directory
-      echo "Checking SAM models..."
-      if [ -d "$TEMP_DIR/models/sams" ]; then
-        echo "SAM models directory found. Contents:"
-        find "$TEMP_DIR/models/sams" -type f | sort
-        echo "Copying SAM models..."
-        cp -v "$TEMP_DIR/models/sams/"* "$COMFYUI_DIR/models/sams/" 2>/dev/null || echo "Warning: No files copied from sams directory"
-      else
-        echo "WARNING: sams directory not found in $TEMP_DIR/models/"
-      fi
-
-      # Check buffalo_l.zip
-      echo "Checking buffalo_l model..."
-      if [ -f "$TEMP_DIR/models/buffalo_l.zip" ]; then
-        echo "Found buffalo_l.zip, extracting..."
-        unzip -v "$TEMP_DIR/models/buffalo_l.zip" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract buffalo_l.zip"
-      else
-        echo "WARNING: buffalo_l.zip not found in $TEMP_DIR/models/"
-        echo "Looking for buffalo_l model in alternate formats or locations..."
-        find "$TEMP_DIR" -name "buffalo_l*" | while read f; do
-          echo "Found at $f, copying..."
-          if [[ "$f" == *.zip ]]; then
-            unzip -v "$f" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract $(basename $f)"
-          else
-            cp -rv "$f" "$COMFYUI_DIR/models/insightface/"
-          fi
-        done
-      fi
-    else
-      echo "ERROR: Models directory not found in the cloned repository."
-      echo "Directory contents:"
-      ls -la "$TEMP_DIR"
-    fi
-
-    # Clean up
-    echo "Cleaning up temporary ReActor files..."
-    rm -rf "$TEMP_DIR"
-
-  else
-    echo "ERROR: Failed to clone ReActor repository."
-    echo "Try running this command manually to see detailed errors:"
-    echo "git clone https://huggingface.co/datasets/Gourieff/ReActor $TEMP_DIR"
-  fi
-fi
-
-# Check if any ReActor models were installed
-echo "Checking if ReActor models were successfully installed..."
-if [ -f "$COMFYUI_DIR/models/insightface/inswapper_128.onnx" ]; then
-  echo "✓ ReActor models installed successfully"
-else
-  echo "⚠️ No ReActor models were installed. You may need to install them manually."
-  echo "Visit: https://huggingface.co/datasets/Gourieff/ReActor for downloads"
-fi
 
 show_progress "Download Complete!"
 echo "All models have been downloaded to $COMFYUI_DIR/models/"
 echo "IPAdapter models have been properly renamed for the Unified Loader."
-echo "ReActor models have been installed."
+echo "NOTE: ReActor models installation has been removed from this script."
+echo "To install ReActor models, please run the separate reactorinstall script."
 echo "You can now start using ComfyUI with all the downloaded models."

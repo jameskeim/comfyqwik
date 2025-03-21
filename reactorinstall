@@ -7,6 +7,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default ComfyUI directory is current directory, but can be specified as argument
 COMFYUI_DIR=${1:-$(pwd)}
 
+# Default is to clean up the temporary repository after installation
+KEEP_REPO=false
+
+# Parse command-line options
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+  --keep-repo)
+    KEEP_REPO=true
+    shift
+    ;;
+  *)
+    if [ "$COMFYUI_DIR" = "${1:-$(pwd)}" ]; then COMFYUI_DIR="$1"; fi
+    shift
+    ;;
+  esac
+done
+
 # Error handling function
 handle_error() {
   echo "ERROR: $1"
@@ -30,6 +47,12 @@ if [ ! -d "$COMFYUI_DIR/models" ] || [ ! -d "$COMFYUI_DIR/comfy" ]; then
   exit 1
 fi
 
+# Create required directories if they don't exist
+mkdir -p "$COMFYUI_DIR/models/insightface"
+mkdir -p "$COMFYUI_DIR/models/reswapper"
+mkdir -p "$COMFYUI_DIR/models/facerestore_models"
+mkdir -p "$COMFYUI_DIR/models/ultralytics/bbox"
+mkdir -p "$COMFYUI_DIR/models/sams"
 
 cd "$COMFYUI_DIR"
 
@@ -39,11 +62,32 @@ cd "$COMFYUI_DIR"
 show_progress "Installing ReActor models"
 
 # Create temporary directory for the repository
-TEMP_DIR="$COMFYUI_DIR/ReActor"
+TEMP_DIR="$COMFYUI_DIR/temp_reactor_repo"
+mkdir -p "$TEMP_DIR"
+
+# Configure git for better reliability with large files and slow connections
+git config --global http.lowSpeedLimit 1000
+git config --global http.lowSpeedTime 60
+git config --global core.compression 0
+
+# Clone the repository with enhanced error handling
+echo "Cloning ReActor models repository (this may take some time)..."
+if ! git clone --depth=1 https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
+  echo "First attempt failed, trying again with different settings..."
+  rm -rf "$TEMP_DIR"
+  mkdir -p "$TEMP_DIR"
+
+  # Try with different timeout settings
+  git config --global http.lowSpeedLimit 500
+  git config --global http.lowSpeedTime 120
+
+  if ! git clone --depth=1 https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
+    handle_error "Failed to clone repository after multiple attempts."
+  fi
+fi
 
 if [ ! -d "$TEMP_DIR/models" ]; then
-  echo "Warning: Failed to clone ReActor repository or models directory not found"
-  echo "Continuing with regular downloads..."
+  handle_error "Models directory not found in cloned repository."
 else
   # Copy inswapper models to insightface directory
   echo "Copying inswapper models..."
@@ -53,7 +97,7 @@ else
   # Copy reswapper models
   echo "Copying reswapper models..."
   if [ -f "$TEMP_DIR/models/reswapper_128.onnx" ]; then
-    cp "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/" 
+    cp "$TEMP_DIR/models/reswapper_128.onnx" "$COMFYUI_DIR/models/reswapper/"
   fi
   if [ -f "$TEMP_DIR/models/reswapper_256.onnx" ]; then
     cp "$TEMP_DIR/models/reswapper_256.onnx" "$COMFYUI_DIR/models/reswapper/"
@@ -83,10 +127,15 @@ else
     unzip -o "$TEMP_DIR/models/buffalo_l.zip" -d "$COMFYUI_DIR/models/insightface/" || echo "Warning: Failed to extract buffalo_l.zip"
   fi
 
+  # Clean up or keep repository based on flag
+  if [ "$KEEP_REPO" = false ]; then
+    echo "Cleaning up temporary ReActor files..."
+    rm -rf "$TEMP_DIR"
+  else
+    echo "Keeping repository for reference at: $TEMP_DIR"
+  fi
 fi
 
-show_progress "Download Complete!"
-echo "All models have been downloaded to $COMFYUI_DIR/models/"
-echo "IPAdapter models have been properly renamed for the Unified Loader."
-echo "ReActor models have been installed."
-echo "You can now start using ComfyUI with all the downloaded models."
+show_progress "Installation Complete!"
+echo "All ReActor models have been installed to $COMFYUI_DIR/models/"
+echo "You can now use ReActor with ComfyUI."
