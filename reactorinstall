@@ -57,6 +57,46 @@ mkdir -p "$COMFYUI_DIR/models/sams"
 cd "$COMFYUI_DIR"
 
 # ====================================================
+# Check for Git LFS installation
+# ====================================================
+show_progress "Checking Git LFS installation"
+
+if ! command -v git-lfs &>/dev/null; then
+  echo "Git LFS is not installed. Attempting to install..."
+
+  # Try to detect the package manager and install git-lfs
+  if command -v apt-get &>/dev/null; then
+    echo "Detected apt package manager. Installing git-lfs..."
+    sudo apt-get update && sudo apt-get install -y git-lfs
+  elif command -v yum &>/dev/null; then
+    echo "Detected yum package manager. Installing git-lfs..."
+    sudo yum install -y git-lfs
+  elif command -v dnf &>/dev/null; then
+    echo "Detected dnf package manager. Installing git-lfs..."
+    sudo dnf install -y git-lfs
+  elif command -v pacman &>/dev/null; then
+    echo "Detected pacman package manager. Installing git-lfs..."
+    sudo pacman -S --noconfirm git-lfs
+  elif command -v brew &>/dev/null; then
+    echo "Detected Homebrew package manager. Installing git-lfs..."
+    brew install git-lfs
+  else
+    echo "WARNING: Could not detect package manager to automatically install Git LFS."
+    echo "Please install Git LFS manually using your system's package manager and run this script again."
+    echo "Visit https://git-lfs.github.com/ for installation instructions."
+    exit 1
+  fi
+
+  # Check if installation was successful
+  if ! command -v git-lfs &>/dev/null; then
+    handle_error "Failed to install Git LFS. Please install it manually."
+  fi
+fi
+
+echo "Git LFS is installed. Initializing..."
+git lfs install || handle_error "Failed to initialize Git LFS."
+
+# ====================================================
 # ReActor Models Installation
 # ====================================================
 show_progress "Installing ReActor models"
@@ -72,7 +112,7 @@ git config --global core.compression 0
 
 # Clone the repository with enhanced error handling
 echo "Cloning ReActor models repository (this may take some time)..."
-if ! git clone --depth=1 https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
+if ! git clone https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
   echo "First attempt failed, trying again with different settings..."
   rm -rf "$TEMP_DIR"
   mkdir -p "$TEMP_DIR"
@@ -81,10 +121,17 @@ if ! git clone --depth=1 https://huggingface.co/datasets/Gourieff/ReActor "$TEMP
   git config --global http.lowSpeedLimit 500
   git config --global http.lowSpeedTime 120
 
-  if ! git clone --depth=1 https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
+  if ! git clone https://huggingface.co/datasets/Gourieff/ReActor "$TEMP_DIR"; then
     handle_error "Failed to clone repository after multiple attempts."
   fi
 fi
+
+# Change to the repository directory and fetch LFS files
+cd "$TEMP_DIR"
+echo "Fetching LFS files (this may take some time)..."
+git lfs pull || handle_error "Failed to pull LFS objects."
+
+cd "$COMFYUI_DIR"
 
 if [ ! -d "$TEMP_DIR/models" ]; then
   handle_error "Models directory not found in cloned repository."
